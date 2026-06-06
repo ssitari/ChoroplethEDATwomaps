@@ -1,0 +1,244 @@
+// ============================================================
+//  config.js  —  Configure this file to use your own data
+// ============================================================
+//
+//  HOW TO USE THIS FILE
+//  ────────────────────
+//  This is the only file you need to edit. The visualization
+//  engine (app.js) and layout (index.html) read everything
+//  they need from the settings you define below.
+//
+//  QUICK START
+//  1. Drop your GeoJSON file into the data/ folder
+//  2. Set DATA_FILE to its path (see below)
+//  3. Set GEOGRAPHY_LABEL to describe one feature (e.g. 'tract', 'county')
+//  4. Update the four identity fields to match your GeoJSON properties
+//  5. Replace the VARIABLES array with your own numeric fields
+//  6. Serve the folder with a local web server and open in a browser
+//
+//  LOCAL SERVER OPTIONS
+//  Browsers block direct file:// access to data — you need a server:
+//    Python:  python3 -m http.server 8000   → open http://localhost:8000
+//    Node:    npx serve .                   → follow the printed URL
+//    VS Code: Live Server extension → right-click index.html → Open with Live Server
+//
+// ============================================================
+
+
+// ── Data file ───────────────────────────────────────────────────────────
+//
+//  Path to your GeoJSON file, relative to this folder.
+//
+//  Requirements:
+//    • Coordinate system: WGS 84 (EPSG:4326) — decimal lat/lng.
+//      If your file uses a projected CRS (State Plane, UTM, etc.)
+//      reproject it first:
+//        Python:  gdf.to_crs('EPSG:4326').to_file('out.geojson', driver='GeoJSON')
+//        QGIS:    Vector → Data Management Tools → Reproject Layer
+//    • Geometry: Polygon or MultiPolygon only
+//    • Variables: all must be pre-calculated numeric fields in the properties.
+//      The tool does not calculate anything — prepare rates, percentages,
+//      and derived fields in your data before loading.
+//    • One property must uniquely identify each feature (see FEATURE_ID_FIELD)
+//    • For large datasets (2,000+ features) consider simplifying geometry:
+//        from shapely import simplify
+//        gdf['geometry'] = gdf['geometry'].apply(
+//            lambda g: simplify(g, tolerance=0.0003, preserve_topology=True))
+//
+export const DATA_FILE = './data/MODZCTAS_Vaccine_2021.geojson';
+
+
+// ── Geography label ─────────────────────────────────────────────────────
+//
+//  Singular label for one feature, shown in status messages and tooltips.
+//  Examples: 'tract', 'county', 'zip code area', 'borough', 'block group'
+//
+export const GEOGRAPHY_LABEL = 'zip code area';
+
+
+// ── Feature identity fields ─────────────────────────────────────────────
+//
+//  FEATURE_ID_FIELD
+//    A property that uniquely identifies each feature.
+//    Can be a number or a string. Used to track selections internally.
+//    Examples: 'GEOID', 'FIPS', 'fid', 'OBJECTID', 'GEO_ID'
+//
+//  FEATURE_NAME_FIELD
+//    A human-readable label shown in tooltips.
+//    Can be the same as FEATURE_ID_FIELD if no better label exists.
+//    Examples: 'NAME', 'GEOID', 'NTA_NAME', 'COUNTY_NAME'
+//
+//  FEATURE_GROUP_FIELD
+//    An optional secondary label shown in tooltips — useful for a parent
+//    geography like borough, county, or state.
+//    Set to null to omit.
+//    Examples: 'BoroName', 'COUNTY', 'STATE_NAME', null
+//
+export const FEATURE_ID_FIELD    = 'fid';
+export const FEATURE_NAME_FIELD  = 'MODZCTA';
+export const FEATURE_GROUP_FIELD = 'Area Name';
+
+
+// ── Variables ───────────────────────────────────────────────────────────
+//
+//  Each entry defines one mappable numeric variable.
+//  Add, remove, or edit entries to match your data.
+//  Any variable can be assigned to either map using the dropdowns.
+//
+//  Fields:
+//    id       A unique short key — no spaces or special characters.
+//             Used to identify the variable in the defaults below.
+//
+//    label    Shown in the variable dropdown, histogram axis, and tooltip.
+//             Keep it concise; long labels may be truncated.
+//
+//    prop     The exact property name in your GeoJSON features.
+//             Must match character-for-character, including spaces and
+//             capitalisation. Check with a GeoJSON viewer if unsure.
+//
+//    fmt      A JavaScript function that formats one value for display
+//             in tooltips and statistics. Common patterns:
+//               Whole number:      v => Math.round(v).toLocaleString()
+//               One decimal:       v => v.toFixed(1)
+//               Percentage:        v => v.toFixed(1) + '%'
+//               Currency:          v => '$' + Math.round(v).toLocaleString()
+//               Per square mile:   v => Math.round(v).toLocaleString() + ' /mi²'
+//
+//    unit     Short unit string shown on the histogram axis label.
+//             Use an empty string '' if no unit is needed.
+//             Examples: '%', '$', '/mi²', 'per 100k', ''
+//
+//    nullVal  A data value that should be treated as "no data".
+//             Features with this value receive the null color on the map
+//             and are excluded from statistics and histograms.
+//             Set to null to disable (no values treated as missing).
+//             Default assumption: 0 often means "no data" in GIS exports.
+//
+//    diverge  Set to true if the variable has a meaningful midpoint —
+//             for example: percent change, deviation from average, z-score,
+//             or any measure that goes both positive and negative.
+//             When true, diverging ColorBrewer palettes become appropriate.
+//             Leave false for variables that only go in one direction
+//             (counts, rates, percentages from 0 to 100).
+//
+export const VARIABLES = [
+  {
+    id:      'vax_full',
+    label:   'Percent Fully Vaccinated',
+    prop:    'Percent Fully Vaccinated',
+    fmt:     v => v.toFixed(1) + '%',
+    unit:    '%',
+    nullVal: 0,
+    diverge: false,
+  },
+  {
+    id:      'vax_one',
+    label:   'Percent With at Least One Dose',
+    prop:    'Percent With at Least One Dose',
+    fmt:     v => v.toFixed(1) + '%',
+    unit:    '%',
+    nullVal: 0,
+    diverge: false,
+  },
+  {
+    id:      'over65',
+    label:   'Percent Over 65',
+    prop:    'Percent Over 65',
+    fmt:     v => v.toFixed(1) + '%',
+    unit:    '%',
+    nullVal: 0,
+    diverge: false,
+  },
+  {
+    id:      'white',
+    label:   'Percent White',
+    prop:    'Percent White',
+    fmt:     v => v.toFixed(1) + '%',
+    unit:    '%',
+    nullVal: 0,
+    diverge: false,
+  },
+  {
+    id:      'black',
+    label:   'Percent Black',
+    prop:    'Percent Black',
+    fmt:     v => v.toFixed(1) + '%',
+    unit:    '%',
+    nullVal: 0,
+    diverge: false,
+  },
+  {
+    id:      'hispanic',
+    label:   'Percent Hispanic',
+    prop:    'Percent Hispanic',
+    fmt:     v => v.toFixed(1) + '%',
+    unit:    '%',
+    nullVal: 0,
+    diverge: false,
+  },
+];
+
+
+// ── Default variable assignments ────────────────────────────────────────
+//
+//  Which variables appear on the top map (X) and bottom map (Y) at load.
+//  Must match an id value from the VARIABLES array above.
+//
+export const DEFAULT_VAR_X = 'over65';
+export const DEFAULT_VAR_Y = 'vax_full';
+
+
+// ── Classification ──────────────────────────────────────────────────────
+//
+//  DEFAULT_CLASSIFICATION controls how features are grouped into classes:
+//    'quantile'   Equal-count classes. Each class contains roughly the same
+//                 number of features. Good for skewed distributions; produces
+//                 visually balanced maps.
+//    'equal'      Equal-width classes. The data range is divided into equal
+//                 intervals. More intuitive breakpoints, but can produce
+//                 unbalanced maps when data is heavily skewed.
+//
+//  DEFAULT_BUCKETS is the number of classes (3–8).
+//  5 or 6 works well for most datasets.
+//  Both can be changed interactively in the toolbar.
+//
+export const DEFAULT_CLASSIFICATION = 'quantile';
+export const DEFAULT_BUCKETS        = 5;
+
+
+// ── Color schemes ───────────────────────────────────────────────────────
+//
+//  ColorBrewer palette applied to the top map (X) and bottom map (Y).
+//  Using different palettes helps visually distinguish the two variables.
+//  Both can be changed interactively using the palette buttons in the toolbar.
+//
+//  Sequential schemes — for data that goes in one direction (rates, counts):
+//    Blues, Greens, Greys, Oranges, Purples, Reds,
+//    BuGn, BuPu, GnBu, OrRd, PuBu, PuBuGn, PuRd, RdPu,
+//    YlGn, YlGnBu, YlOrBr, YlOrRd
+//
+//  Diverging schemes — for data with a meaningful midpoint
+//  (requires diverge: true on the variable):
+//    BrBG, PiYG, PRGn, PuOr, RdBu, RdGy, RdYlBu, RdYlGn, Spectral
+//
+export const DEFAULT_SCHEME_X = 'BuGn';
+export const DEFAULT_SCHEME_Y = 'BuGn';
+
+
+// ── Display options ─────────────────────────────────────────────────────
+//
+//  NULL_COLOR
+//    Fill color for features with null or missing data.
+//    A neutral grey works best against most base colors.
+//
+//  SELECTION_COLOR
+//    Highlight color used in histograms to show selected features.
+//    Should contrast clearly with both map palette colors.
+//
+//  DEEMPHASIS_OPACITY
+//    Opacity of non-selected features when a selection is active.
+//    Range: 0 (invisible) to 1 (full opacity). 0.15–0.25 works well.
+//
+export const NULL_COLOR         = '#d0d0d0';
+export const SELECTION_COLOR    = '#e07b39';
+export const DEEMPHASIS_OPACITY = 0.2;

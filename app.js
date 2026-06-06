@@ -1,0 +1,1113 @@
+// ============================================================
+//  app.js  —  Visualization engine
+//  Do not edit unless you are modifying the tool itself.
+// ============================================================
+
+import {
+  DATA_FILE, GEOGRAPHY_LABEL, FEATURE_ID_FIELD,
+  FEATURE_NAME_FIELD, FEATURE_GROUP_FIELD,
+  VARIABLES, DEFAULT_VAR_X, DEFAULT_VAR_Y,
+  DEFAULT_CLASSIFICATION, DEFAULT_BUCKETS,
+  DEFAULT_SCHEME_X, DEFAULT_SCHEME_Y,
+  NULL_COLOR, SELECTION_COLOR, DEEMPHASIS_OPACITY,
+} from './config.js';
+
+// ============================================================
+//  COLORBREWER PALETTE CATALOGUE
+// ============================================================
+
+const PALETTE_SCHEMES = {
+  sequential: [
+    { id: 'YlOrRd',  d3: 'schemeYlOrRd'  },
+    { id: 'YlOrBr',  d3: 'schemeYlOrBr'  },
+    { id: 'YlGnBu',  d3: 'schemeYlGnBu'  },
+    { id: 'YlGn',    d3: 'schemeYlGn'    },
+    { id: 'Reds',    d3: 'schemeReds'    },
+    { id: 'RdPu',    d3: 'schemeRdPu'    },
+    { id: 'Purples', d3: 'schemePurples' },
+    { id: 'PuRd',    d3: 'schemePuRd'    },
+    { id: 'PuBuGn',  d3: 'schemePuBuGn'  },
+    { id: 'PuBu',    d3: 'schemePuBu'    },
+    { id: 'OrRd',    d3: 'schemeOrRd'    },
+    { id: 'Oranges', d3: 'schemeOranges' },
+    { id: 'Greys',   d3: 'schemeGreys'   },
+    { id: 'Greens',  d3: 'schemeGreens'  },
+    { id: 'GnBu',    d3: 'schemeGnBu'    },
+    { id: 'BuPu',    d3: 'schemeBuPu'    },
+    { id: 'BuGn',    d3: 'schemeBuGn'    },
+    { id: 'Blues',   d3: 'schemeBlues'   },
+  ],
+  diverging: [
+    { id: 'Spectral', d3: 'schemeSpectral' },
+    { id: 'RdYlGn',   d3: 'schemeRdYlGn'  },
+    { id: 'RdYlBu',   d3: 'schemeRdYlBu'  },
+    { id: 'RdGy',     d3: 'schemeRdGy'    },
+    { id: 'RdBu',     d3: 'schemeRdBu'    },
+    { id: 'PuOr',     d3: 'schemePuOr'    },
+    { id: 'PRGn',     d3: 'schemePRGn'    },
+    { id: 'PiYG',     d3: 'schemePiYG'    },
+    { id: 'BrBG',     d3: 'schemeBrBG'    },
+  ],
+};
+
+const ALL_SCHEMES = [...PALETTE_SCHEMES.sequential, ...PALETTE_SCHEMES.diverging];
+
+function brewerColors(schemeId, k) {
+  const entry = ALL_SCHEMES.find(s => s.id === schemeId);
+  if (!entry) return d3.schemeBlues[k] || d3.schemeBlues[5];
+  const arr = d3[entry.d3];
+  if (!arr) return d3.schemeBlues[k] || d3.schemeBlues[5];
+  const available = Object.keys(arr).map(Number).filter(n => !isNaN(n));
+  if (!available.length) return d3.schemeBlues[5];
+  const clamped = Math.min(Math.max(k, Math.min(...available)), Math.max(...available));
+  return arr[clamped];
+}
+
+// ============================================================
+//  STATE
+// ============================================================
+
+const state = {
+  geojson:        null,
+  varX:           DEFAULT_VAR_X,
+  varY:           DEFAULT_VAR_Y,
+  classification: DEFAULT_CLASSIFICATION,
+  buckets:        DEFAULT_BUCKETS,
+  schemeX:        DEFAULT_SCHEME_X,
+  schemeY:        DEFAULT_SCHEME_Y,
+  selectedIds:    new Set(),
+  selMode:        null,   // null | 'mapX' | 'mapY' | 'scatter'
+  zoomTransform:  d3.zoomIdentity,
+};
+
+// ============================================================
+//  CLASSIFICATION
+// ============================================================
+
+function classifyQuantile(values, k) {
+  const sorted = [...values].sort(d3.ascending);
+  const breaks = [];
+  for (let i = 1; i < k; i++) breaks.push(d3.quantile(sorted, i / k));
+  return [sorted[0], ...breaks, sorted[sorted.length - 1]];
+}
+
+function classifyEqual(values, k) {
+  const lo = d3.min(values), hi = d3.max(values);
+  const step = (hi - lo) / k;
+  return d3.range(0, k + 1).map(i => lo + i * step);
+}
+
+function getBreaks(values, k, method) {
+  if (!values.length) return [];
+  return method === 'equal' ? classifyEqual(values, k) : classifyQuantile(values, k);
+}
+
+function makeColorScale(schemeId, breaks, k) {
+  const colors = brewerColors(schemeId, k);
+  return d3.scaleThreshold()
+    .domain(breaks.slice(1, breaks.length - 1))
+    .range(colors);
+}
+
+// ============================================================
+//  HELPERS
+// ============================================================
+
+function getVarDef(varId) {
+  return VARIABLES.find(v => v.id === varId) || VARIABLES[0];
+}
+
+function featureId(f) {
+  return f.properties[FEATURE_ID_FIELD];
+}
+
+function getFeatureValue(f, varId) {
+  const vd = getVarDef(varId);
+  const v  = f.properties[vd.prop];
+  const nv = vd.nullVal ?? 0;
+  return (v == null || v === nv) ? null : +v;
+}
+
+function getValues(varId) {
+  if (!state.geojson) return [];
+  return state.geojson.features
+    .map(f => getFeatureValue(f, varId))
+    .filter(v => v != null);
+}
+
+function getValuesFor(varId, features) {
+  return features.map(f => getFeatureValue(f, varId)).filter(v => v != null);
+}
+
+function fmtBreak(v) {
+  if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1) + 'k';
+  return Number.isInteger(v) ? v.toString() : v.toFixed(1);
+}
+
+// ============================================================
+//  MAP DESCRIPTORS
+// ============================================================
+
+const mapX = {
+  id: 'X', svgId: 'mapSvgX', paneId: 'mapPaneX',
+  legendTitleId: 'legendTitleX', legendSwatchesId: 'legendSwatchesX',
+  legendWarnId: 'legendWarnX', colorBtnId: 'colorBtnX',
+  colorBtnSwatchesId: 'colorBtnSwatchesX', colorDdId: 'colorDropdownX',
+  get varId()    { return state.varX; },
+  get schemeId() { return state.schemeX; },
+  svg: null, zoomRoot: null, tractsG: null, brushG: null,
+  zoomBehavior: null, projection: null, pathGen: null,
+};
+
+const mapY = {
+  id: 'Y', svgId: 'mapSvgY', paneId: 'mapPaneY',
+  legendTitleId: 'legendTitleY', legendSwatchesId: 'legendSwatchesY',
+  legendWarnId: 'legendWarnY', colorBtnId: 'colorBtnY',
+  colorBtnSwatchesId: 'colorBtnSwatchesY', colorDdId: 'colorDropdownY',
+  get varId()    { return state.varY; },
+  get schemeId() { return state.schemeY; },
+  svg: null, zoomRoot: null, tractsG: null, brushG: null,
+  zoomBehavior: null, projection: null, pathGen: null,
+};
+
+const BOTH_MAPS = [mapX, mapY];
+
+// ============================================================
+//  MAP INIT & RESIZE
+// ============================================================
+
+function initMap(m) {
+  m.svg      = d3.select('#' + m.svgId);
+  const zoomRoot = m.svg.append('g').attr('class', 'zoom-root');
+  m.zoomRoot = zoomRoot;
+  m.tractsG  = zoomRoot.append('g').attr('class', 'tracts');
+  m.brushG   = zoomRoot.append('g').attr('class', 'map-brush');
+
+  m.brushG.append('path').attr('class', 'sel-path');
+  m.brushG.append('rect').attr('class', 'sel-rect')
+    .attr('fill', 'rgba(70,110,240,0.06)').attr('stroke', 'none')
+    .style('display', 'none');
+
+  m.zoomBehavior = d3.zoom()
+    .scaleExtent([0.5, 32])
+    .filter(event => {
+      if (event.type === 'wheel') return true;
+      if (event.type === 'mousedown') return !event.shiftKey;
+      return false;
+    });
+
+  m.svg.call(m.zoomBehavior);
+  m.svg.on('dblclick.zoom', null);
+}
+
+function resizeMap(m) {
+  const el = document.getElementById(m.paneId);
+  const w = el.clientWidth, h = el.clientHeight;
+  if (!w || !h) return;
+  m.svg.attr('viewBox', `0 0 ${w} ${h}`).attr('width', w).attr('height', h);
+  m.projection = d3.geoMercator().fitSize([w, h], state.geojson);
+  m.pathGen    = d3.geoPath().projection(m.projection);
+  m.zoomBehavior.translateExtent([[-w * 0.5, -h * 0.5], [w * 1.5, h * 1.5]]);
+  m.zoomRoot.attr('transform', state.zoomTransform);
+}
+
+// ============================================================
+//  ZOOM SYNC
+// ============================================================
+
+let syncing   = false;
+let hintShown = false;
+
+function setupZoomSync() {
+  BOTH_MAPS.forEach(m => {
+    const other = m === mapX ? mapY : mapX;
+
+    m.zoomBehavior.on('zoom', event => {
+      m.zoomRoot.attr('transform', event.transform);
+
+      if (!syncing) {
+        state.zoomTransform = event.transform;
+        if (other.svg) {
+          syncing = true;
+          other.svg.call(other.zoomBehavior.transform, event.transform);
+          syncing = false;
+        }
+        if (!hintShown && event.transform.k > 1.5) {
+          hintShown = true;
+          const hint = document.getElementById('shiftHint');
+          hint.classList.add('visible');
+          setTimeout(() => hint.classList.remove('visible'), 3000);
+        }
+      }
+    });
+  });
+}
+
+function zoomBy(factor) {
+  mapX.svg.transition().duration(280).call(mapX.zoomBehavior.scaleBy, factor);
+}
+function zoomReset() {
+  mapX.svg.transition().duration(380).call(mapX.zoomBehavior.transform, d3.zoomIdentity);
+}
+
+// ============================================================
+//  DRAW & COLOR
+// ============================================================
+
+function drawTracts(m) {
+  if (!state.geojson || !m.pathGen) return;
+  m.tractsG.selectAll('.tract')
+    .data(state.geojson.features, featureId)
+    .join('path')
+    .attr('class', 'tract')
+    .attr('d', m.pathGen)
+    .attr('stroke', '#777')
+    .attr('stroke-width', 0.5)
+    .on('mousemove', (event, d) => showTooltip(event, d))
+    .on('mouseleave', hideTooltip);
+
+  applyColors(m);
+  drawLegend(m);
+}
+
+function applyColors(m) {
+  if (!state.geojson || !m.tractsG) return;
+  const allVals    = getValues(m.varId);
+  const breaks     = getBreaks(allVals, state.buckets, state.classification);
+  const colorScale = makeColorScale(m.schemeId, breaks, state.buckets);
+  const hasSel     = state.selectedIds.size > 0;
+
+  m.tractsG.selectAll('.tract')
+    .attr('fill', d => {
+      const v = getFeatureValue(d, m.varId);
+      if (v == null) return NULL_COLOR;
+      if (hasSel && !state.selectedIds.has(featureId(d))) return NULL_COLOR;
+      return colorScale(v);
+    })
+    .attr('opacity', d => {
+      if (!hasSel) return 1;
+      return state.selectedIds.has(featureId(d)) ? 1 : DEEMPHASIS_OPACITY;
+    });
+}
+
+// ============================================================
+//  LEGEND
+// ============================================================
+
+function drawLegend(m) {
+  const vd      = getVarDef(m.varId);
+  const allVals = getValues(m.varId);
+  const breaks  = getBreaks(allVals, state.buckets, state.classification);
+  const colorScale = makeColorScale(m.schemeId, breaks, state.buckets);
+  const colors  = colorScale.range();
+  const k       = state.buckets;
+
+  document.getElementById(m.legendTitleId).textContent = vd.label;
+
+  const container = document.getElementById(m.legendSwatchesId);
+  container.innerHTML = '';
+  for (let i = 0; i < k; i++) {
+    const lo  = breaks[i], hi = breaks[i + 1];
+    const lbl = i === k - 1 ? `${fmtBreak(lo)} +` : `${fmtBreak(lo)} – ${fmtBreak(hi)}`;
+    const row = document.createElement('div');
+    row.className = 'legend-row';
+    row.innerHTML =
+      `<span class="legend-swatch" style="background:${colors[i]}"></span>` +
+      `<span class="legend-label">${lbl}</span>`;
+    container.appendChild(row);
+  }
+  const nullRow = document.createElement('div');
+  nullRow.className = 'legend-row';
+  nullRow.innerHTML =
+    `<span class="legend-swatch" style="background:${NULL_COLOR}"></span>` +
+    `<span class="legend-label" style="color:#bbb">No data</span>`;
+  container.appendChild(nullRow);
+
+  const isDiverging = PALETTE_SCHEMES.diverging.some(s => s.id === m.schemeId);
+  document.getElementById(m.legendWarnId).style.display =
+    (isDiverging && !vd.diverge) ? 'block' : 'none';
+}
+
+// ============================================================
+//  COLOR SCHEME DROPDOWNS
+// ============================================================
+
+function buildDropdown(m) {
+  const inner = document.getElementById(m.colorDdId);
+  inner.innerHTML = '';
+
+  ['sequential', 'diverging'].forEach(family => {
+    const hdr = document.createElement('div');
+    hdr.className = 'dd-family-label';
+    hdr.textContent = family === 'sequential' ? 'Sequential' : 'Diverging';
+    inner.appendChild(hdr);
+
+    PALETTE_SCHEMES[family].forEach(scheme => {
+      const row = document.createElement('div');
+      row.className = 'dd-row' + (scheme.id === m.schemeId ? ' dd-row--active' : '');
+      row.dataset.schemeId = scheme.id;
+      const k = Math.min(Math.max(state.buckets, 3), 9);
+      brewerColors(scheme.id, k).forEach(c => {
+        const s = document.createElement('span');
+        s.className = 'dd-swatch'; s.style.background = c;
+        row.appendChild(s);
+      });
+      row.addEventListener('click', () => { onSchemeChange(m, scheme.id); closeDropdown(m); });
+      inner.appendChild(row);
+    });
+  });
+
+  const warn = document.createElement('div');
+  warn.className = 'dd-diverge-warn';
+  warn.id = 'ddWarn' + m.id;
+  warn.textContent = '⚠ Diverging palette on non-diverging variable';
+  inner.appendChild(warn);
+  updateDdWarn(m);
+}
+
+function updateDdWarn(m) {
+  const vd = getVarDef(m.varId);
+  const isDiverging = PALETTE_SCHEMES.diverging.some(s => s.id === m.schemeId);
+  const warn = document.getElementById('ddWarn' + m.id);
+  if (warn) warn.style.display = (isDiverging && !vd.diverge) ? 'block' : 'none';
+}
+
+function refreshDropdownSwatches(m) {
+  const k = Math.min(Math.max(state.buckets, 3), 9);
+  document.querySelectorAll(`#${m.colorDdId} .dd-row`).forEach(row => {
+    const id = row.dataset.schemeId;
+    row.innerHTML = '';
+    brewerColors(id, k).forEach(c => {
+      const s = document.createElement('span');
+      s.className = 'dd-swatch'; s.style.background = c;
+      row.appendChild(s);
+    });
+    row.classList.toggle('dd-row--active', id === m.schemeId);
+  });
+}
+
+function updateColorBtn(m) {
+  const wrap = document.getElementById(m.colorBtnSwatchesId);
+  wrap.innerHTML = '';
+  const k = Math.min(Math.max(state.buckets, 3), 9);
+  brewerColors(m.schemeId, k).forEach(c => {
+    const s = document.createElement('span');
+    s.className = 'btn-swatch'; s.style.background = c;
+    wrap.appendChild(s);
+  });
+}
+
+function openDropdown(m) {
+  const btn  = document.getElementById(m.colorBtnId);
+  const dd   = document.getElementById(m.colorDdId);
+  const rect = btn.getBoundingClientRect();
+  dd.style.top  = (rect.bottom + 4) + 'px';
+  dd.style.left = rect.left + 'px';
+  dd.classList.add('open');
+  document.getElementById(m.colorBtnId).classList.add('open');
+}
+
+function closeDropdown(m) {
+  document.getElementById(m.colorDdId).classList.remove('open');
+  document.getElementById(m.colorBtnId).classList.remove('open');
+}
+
+function toggleDropdown(m) {
+  const isOpen = document.getElementById(m.colorDdId).classList.contains('open');
+  BOTH_MAPS.forEach(closeDropdown);
+  if (!isOpen) openDropdown(m);
+}
+
+// ============================================================
+//  MAP LASSO & RECTANGLE SELECTION
+//  Shift+drag = freehand lasso; Shift+Alt+drag = rectangle.
+// ============================================================
+
+let selDrag = null;
+
+function svgPoint(event, m) {
+  const el   = document.getElementById(m.paneId);
+  const rect = el.getBoundingClientRect();
+  const t    = state.zoomTransform;
+  return [(event.clientX - rect.left - t.x) / t.k,
+          (event.clientY - rect.top  - t.y) / t.k];
+}
+
+function setupLasso(m) {
+  m.svg
+    .on('mousedown.sel', event => {
+      if (!event.shiftKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const mode = event.altKey ? 'rect' : 'lasso';
+      const pt   = svgPoint(event, m);
+      selDrag = { mode, map: m, points: [pt], startX: pt[0], startY: pt[1] };
+      showSelMode(mode);
+    })
+    .on('mousemove.sel', event => {
+      if (!selDrag || selDrag.map !== m) return;
+      event.preventDefault();
+      const pt = svgPoint(event, m);
+      selDrag.points.push(pt);
+      if (selDrag.mode === 'lasso') {
+        const closed = [...selDrag.points, selDrag.points[0]];
+        m.brushG.select('.sel-path')
+          .attr('d', 'M' + closed.map(p => p.join(',')).join('L') + 'Z')
+          .attr('fill', 'rgba(70,110,240,0.07)')
+          .attr('stroke', '#4466cc').attr('stroke-width', 1.5)
+          .attr('stroke-dasharray', '5,3').attr('stroke-linejoin', 'round');
+      } else {
+        const x0 = Math.min(selDrag.startX, pt[0]), y0 = Math.min(selDrag.startY, pt[1]);
+        const w  = Math.abs(pt[0] - selDrag.startX), h = Math.abs(pt[1] - selDrag.startY);
+        m.brushG.select('.sel-rect').style('display', null)
+          .attr('x', x0).attr('y', y0).attr('width', w).attr('height', h);
+        m.brushG.select('.sel-path')
+          .attr('d', `M${x0},${y0}h${w}v${h}h${-w}Z`)
+          .attr('fill', 'none').attr('stroke', '#4466cc')
+          .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3');
+      }
+    })
+    .on('mouseup.sel', event => {
+      if (!selDrag || selDrag.map !== m) return;
+      const drag = selDrag;
+      selDrag = null;
+      hideSelMode();
+
+      const poly = drag.mode === 'lasso'
+        ? drag.points
+        : (() => {
+            const pt = svgPoint(event, m);
+            const x0 = Math.min(drag.startX, pt[0]), y0 = Math.min(drag.startY, pt[1]);
+            const x1 = Math.max(drag.startX, pt[0]), y1 = Math.max(drag.startY, pt[1]);
+            return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
+          })();
+
+      if (poly.length < 3) { clearSelPath(m); return; }
+
+      state.selectedIds.clear();
+      state.selMode = 'map' + m.id;
+      state.geojson.features.forEach(f => {
+        const c = m.pathGen.centroid(f);
+        if (!isNaN(c[0]) && d3.polygonContains(poly, c))
+          state.selectedIds.add(featureId(f));
+      });
+
+      m.brushG.select('.sel-path').attr('stroke-dasharray', null)
+        .attr('fill', 'rgba(70,110,240,0.09)');
+      m.brushG.select('.sel-rect').style('display', 'none');
+      setTimeout(() => clearSelPath(m), 600);
+
+      showClearBtn(state.selectedIds.size > 0);
+      BOTH_MAPS.forEach(applyColors);
+      drawScatter();
+      drawStats();
+      updateStatus();
+    });
+}
+
+function clearSelPath(m) {
+  m.brushG.select('.sel-path').attr('d', null).attr('fill', 'none');
+  m.brushG.select('.sel-rect').style('display', 'none');
+}
+
+function showSelMode(mode) {
+  const el = document.getElementById('selModeIndicator');
+  el.textContent = mode === 'lasso' ? '⟡ Lasso' : '⬜ Rectangle';
+  el.style.opacity = '1';
+}
+function hideSelMode() {
+  document.getElementById('selModeIndicator').style.opacity = '0';
+}
+
+// ============================================================
+//  TOOLTIP
+//  Shows values for both variables when hovering either map or
+//  a scatterplot dot.
+// ============================================================
+
+function showTooltip(event, d) {
+  const p    = d.properties;
+  const vdX  = getVarDef(state.varX);
+  const vdY  = getVarDef(state.varY);
+  const valX = getFeatureValue(d, state.varX);
+  const valY = getFeatureValue(d, state.varY);
+  const name  = p[FEATURE_NAME_FIELD] || '';
+  const group = FEATURE_GROUP_FIELD ? p[FEATURE_GROUP_FIELD] : null;
+
+  const tip = document.getElementById('tooltip');
+  tip.style.left    = Math.min(event.clientX + 14, window.innerWidth - 220) + 'px';
+  tip.style.top     = Math.max(event.clientY - 40, 8) + 'px';
+  tip.style.display = 'block';
+  tip.innerHTML =
+    `${group ? `<span class="tip-group">${group}</span> · ` : ''}<span class="tip-id">${name}</span><br>` +
+    `<span class="tip-label">▲ ${vdX.label}</span><br>` +
+    `<span class="tip-val">${valX != null ? vdX.fmt(valX) : 'No data'}</span><br>` +
+    `<span class="tip-label">▼ ${vdY.label}</span><br>` +
+    `<span class="tip-val-y">${valY != null ? vdY.fmt(valY) : 'No data'}</span>`;
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// ============================================================
+//  SCATTERPLOT
+//  X axis = varX (Map ▲), Y axis = varY (Map ▼)
+//  One dot per feature. Lasso selection links to both maps.
+//  OLS regression lines shown for full population and selection.
+// ============================================================
+
+const SM = { top: 24, right: 22, bottom: 50, left: 52 };
+
+let scSvg, scG, scBrushG;
+let scXScale, scYScale;
+
+function scDims() {
+  const el = document.getElementById('scatterPane');
+  const W  = Math.max(el.clientWidth  - SM.left - SM.right,  10);
+  const H  = Math.max(el.clientHeight - SM.top  - SM.bottom, 10);
+  return { W, H, tw: el.clientWidth, th: el.clientHeight };
+}
+
+function initScatter() {
+  const { tw, th, W, H } = scDims();
+  scSvg = d3.select('#scatterSvg').attr('width', tw).attr('height', th)
+            .attr('viewBox', `0 0 ${tw} ${th}`);
+
+  scG = scSvg.append('g').attr('transform', `translate(${SM.left},${SM.top})`);
+  scG.append('g').attr('class', 'sc-x-axis').attr('transform', `translate(0,${H})`);
+  scG.append('g').attr('class', 'sc-y-axis');
+  scG.append('text').attr('class', 'sc-x-label').attr('text-anchor', 'middle')
+    .attr('y', H + 40).style('font-size', '10px').style('fill', '#888');
+  scG.append('text').attr('class', 'sc-y-label').attr('text-anchor', 'middle')
+    .attr('transform', 'rotate(-90)').attr('y', -SM.left + 13)
+    .style('font-size', '10px').style('fill', '#888');
+
+  // Regression lines — all-population below dots, selection on top
+  scG.append('line').attr('class', 'reg-all')
+    .attr('stroke', '#aaa').attr('stroke-width', 1).attr('stroke-dasharray', '4,3')
+    .style('pointer-events', 'none');
+  scG.append('g').attr('class', 'dots-layer');
+  scG.append('line').attr('class', 'reg-sel')
+    .attr('stroke', SELECTION_COLOR).attr('stroke-width', 1.5)
+    .style('display', 'none').style('pointer-events', 'none');
+
+  // Correlation labels
+  scG.append('text').attr('class', 'r-label-all')
+    .style('font-size', '10px').style('fill', '#aaa').style('pointer-events', 'none');
+  scG.append('text').attr('class', 'r-label-sel')
+    .style('font-size', '10px').style('fill', SELECTION_COLOR)
+    .style('display', 'none').style('pointer-events', 'none');
+
+  // Brush/lasso overlay
+  scBrushG = scSvg.append('g').attr('transform', `translate(${SM.left},${SM.top})`);
+  scBrushG.append('path').attr('class', 'sc-sel-path');
+  scBrushG.append('rect').attr('class', 'sc-sel-rect')
+    .attr('fill', 'rgba(70,110,240,0.06)').style('display', 'none');
+
+  setupScatterLasso();
+}
+
+function resizeScatter() {
+  const { tw, th, W, H } = scDims();
+  scSvg.attr('width', tw).attr('height', th).attr('viewBox', `0 0 ${tw} ${th}`);
+  scG.select('.sc-x-axis').attr('transform', `translate(0,${H})`);
+  scG.select('.sc-x-label').attr('y', H + 40);
+}
+
+function computeOLS(pairs) {
+  const n = pairs.length;
+  if (n < 2) return null;
+  const mx = d3.mean(pairs, p => p[0]);
+  const my = d3.mean(pairs, p => p[1]);
+  const num = d3.sum(pairs, p => (p[0] - mx) * (p[1] - my));
+  const den = d3.sum(pairs, p => (p[0] - mx) ** 2);
+  if (Math.abs(den) < 1e-12) return null;
+  const slope     = num / den;
+  const intercept = my - slope * mx;
+  const sst = d3.sum(pairs, p => (p[1] - my) ** 2);
+  const ssr = d3.sum(pairs, p => (p[1] - (slope * p[0] + intercept)) ** 2);
+  const r2  = sst > 0 ? 1 - ssr / sst : 0;
+  const r   = Math.sign(slope) * Math.sqrt(Math.abs(r2));
+  return { slope, intercept, r2, r };
+}
+
+function drawRegLine(selector, ols, W) {
+  if (!ols) { scG.select(selector).style('display', 'none'); return; }
+  const [x0, x1] = scXScale.domain();
+  scG.select(selector).style('display', null)
+    .attr('x1', scXScale(x0)).attr('y1', scYScale(ols.slope * x0 + ols.intercept))
+    .attr('x2', scXScale(x1)).attr('y2', scYScale(ols.slope * x1 + ols.intercept));
+}
+
+function drawScatter() {
+  if (!state.geojson) return;
+  const { W, H } = scDims();
+  const vdX = getVarDef(state.varX);
+  const vdY = getVarDef(state.varY);
+
+  const features = state.geojson.features.filter(f =>
+    getFeatureValue(f, state.varX) != null && getFeatureValue(f, state.varY) != null
+  );
+
+  scXScale = d3.scaleLinear()
+    .domain(d3.extent(features, f => getFeatureValue(f, state.varX))).range([0, W]).nice();
+  scYScale = d3.scaleLinear()
+    .domain(d3.extent(features, f => getFeatureValue(f, state.varY))).range([H, 0]).nice();
+
+  // Axes
+  scG.select('.sc-x-axis').call(
+    d3.axisBottom(scXScale).ticks(5).tickFormat(v =>
+      Math.abs(v) >= 1e6 ? (v/1e6).toFixed(0)+'M' :
+      Math.abs(v) >= 1e3 ? (v/1e3).toFixed(0)+'k' : v
+    )
+  ).selectAll('text').style('font-size', '10px');
+  scG.select('.sc-y-axis').call(
+    d3.axisLeft(scYScale).ticks(5).tickFormat(v =>
+      Math.abs(v) >= 1e6 ? (v/1e6).toFixed(0)+'M' :
+      Math.abs(v) >= 1e3 ? (v/1e3).toFixed(0)+'k' : v
+    )
+  ).selectAll('text').style('font-size', '10px');
+  scG.select('.sc-x-label').attr('x', W / 2).text(vdX.label);
+  scG.select('.sc-y-label').attr('x', -H / 2).text(vdY.label);
+
+  // Regression — full population
+  const allPairs = features.map(f => [getFeatureValue(f, state.varX), getFeatureValue(f, state.varY)]);
+  const olsAll   = computeOLS(allPairs);
+  drawRegLine('.reg-all', olsAll, W);
+  if (olsAll) {
+    scG.select('.r-label-all').style('display', null)
+      .attr('x', W - 4).attr('y', 14).attr('text-anchor', 'end')
+      .text(`r = ${olsAll.r.toFixed(2)}`);
+  } else {
+    scG.select('.r-label-all').style('display', 'none');
+  }
+
+  // Dots
+  const hasSel = state.selectedIds.size > 0;
+  scG.select('.dots-layer').selectAll('.dot')
+    .data(features, featureId)
+    .join('circle')
+    .attr('class', 'dot')
+    .attr('cx', f => scXScale(getFeatureValue(f, state.varX)))
+    .attr('cy', f => scYScale(getFeatureValue(f, state.varY)))
+    .attr('r', 4)
+    .attr('fill', f =>
+      hasSel && state.selectedIds.has(featureId(f)) ? SELECTION_COLOR : '#888'
+    )
+    .attr('fill-opacity', f => {
+      if (!hasSel) return 0.6;
+      return state.selectedIds.has(featureId(f)) ? 0.9 : DEEMPHASIS_OPACITY;
+    })
+    .attr('stroke', f =>
+      hasSel && state.selectedIds.has(featureId(f)) ? '#b85c18' : 'none'
+    )
+    .attr('stroke-width', 1)
+    .on('mousemove', (event, f) => showTooltip(event, f))
+    .on('mouseleave', hideTooltip);
+
+  // Regression — selection
+  if (hasSel && state.selectedIds.size > 2) {
+    const selPairs = features
+      .filter(f => state.selectedIds.has(featureId(f)))
+      .map(f => [getFeatureValue(f, state.varX), getFeatureValue(f, state.varY)]);
+    const olsSel = computeOLS(selPairs);
+    drawRegLine('.reg-sel', olsSel, W);
+    if (olsSel) {
+      scG.select('.r-label-sel').style('display', null)
+        .attr('x', W - 4).attr('y', 26).attr('text-anchor', 'end')
+        .text(`r = ${olsSel.r.toFixed(2)} (sel)`);
+    } else {
+      scG.select('.r-label-sel').style('display', 'none');
+    }
+  } else {
+    scG.select('.reg-sel').style('display', 'none');
+    scG.select('.r-label-sel').style('display', 'none');
+  }
+}
+
+// ── Scatter lasso ────────────────────────────────────────────
+//  Uses the scatter coordinate space (xScale/yScale), not map
+//  projection space. No zoom transform to account for.
+
+function svgPointScatter(event) {
+  const r = document.getElementById('scatterSvg').getBoundingClientRect();
+  return [event.clientX - r.left - SM.left,
+          event.clientY - r.top  - SM.top];
+}
+
+function setupScatterLasso() {
+  let scDrag = null;
+
+  scSvg
+    .on('mousedown.sel', event => {
+      if (!event.shiftKey) return;
+      event.preventDefault();
+      const mode = event.altKey ? 'rect' : 'lasso';
+      const pt   = svgPointScatter(event);
+      scDrag = { mode, points: [pt], startX: pt[0], startY: pt[1] };
+      showSelMode(mode);
+    })
+    .on('mousemove.sel', event => {
+      if (!scDrag) return;
+      event.preventDefault();
+      const pt = svgPointScatter(event);
+      scDrag.points.push(pt);
+      if (scDrag.mode === 'lasso') {
+        const closed = [...scDrag.points, scDrag.points[0]];
+        scBrushG.select('.sc-sel-path')
+          .attr('d', 'M' + closed.map(p => p.join(',')).join('L') + 'Z')
+          .attr('fill', 'rgba(70,110,240,0.07)')
+          .attr('stroke', '#4466cc').attr('stroke-width', 1.5)
+          .attr('stroke-dasharray', '5,3').attr('stroke-linejoin', 'round');
+      } else {
+        const x0 = Math.min(scDrag.startX, pt[0]), y0 = Math.min(scDrag.startY, pt[1]);
+        const w  = Math.abs(pt[0] - scDrag.startX), h = Math.abs(pt[1] - scDrag.startY);
+        scBrushG.select('.sc-sel-rect').style('display', null)
+          .attr('x', x0).attr('y', y0).attr('width', w).attr('height', h);
+        scBrushG.select('.sc-sel-path')
+          .attr('d', `M${x0},${y0}h${w}v${h}h${-w}Z`)
+          .attr('fill', 'none').attr('stroke', '#4466cc')
+          .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3');
+      }
+    })
+    .on('mouseup.sel', event => {
+      if (!scDrag) return;
+      const drag = scDrag;
+      scDrag = null;
+      hideSelMode();
+
+      const poly = drag.mode === 'lasso'
+        ? drag.points
+        : (() => {
+            const pt = svgPointScatter(event);
+            const x0 = Math.min(drag.startX, pt[0]), y0 = Math.min(drag.startY, pt[1]);
+            const x1 = Math.max(drag.startX, pt[0]), y1 = Math.max(drag.startY, pt[1]);
+            return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
+          })();
+
+      if (poly.length < 3) { clearScatterSelPath(); return; }
+
+      state.selectedIds.clear();
+      state.selMode = 'scatter';
+
+      if (scXScale && scYScale) {
+        state.geojson.features.forEach(f => {
+          const x = getFeatureValue(f, state.varX);
+          const y = getFeatureValue(f, state.varY);
+          if (x == null || y == null) return;
+          if (d3.polygonContains(poly, [scXScale(x), scYScale(y)]))
+            state.selectedIds.add(featureId(f));
+        });
+      }
+
+      scBrushG.select('.sc-sel-path').attr('stroke-dasharray', null)
+        .attr('fill', 'rgba(70,110,240,0.09)');
+      scBrushG.select('.sc-sel-rect').style('display', 'none');
+      setTimeout(clearScatterSelPath, 600);
+
+      showClearBtn(state.selectedIds.size > 0);
+      BOTH_MAPS.forEach(applyColors);
+      drawScatter();
+      drawStats();
+      updateStatus();
+    });
+}
+
+function clearScatterSelPath() {
+  scBrushG.select('.sc-sel-path').attr('d', null).attr('fill', 'none');
+  scBrushG.select('.sc-sel-rect').style('display', 'none');
+}
+
+// ============================================================
+//  STATISTICS PANEL
+// ============================================================
+
+function calcStats(vals) {
+  if (!vals || !vals.length) return null;
+  const sorted = [...vals].sort(d3.ascending);
+  return {
+    n:      sorted.length,
+    mean:   d3.mean(sorted),
+    median: d3.median(sorted),
+    min:    sorted[0],
+    max:    sorted[sorted.length - 1],
+    stddev: d3.deviation(sorted),
+  };
+}
+
+function drawStats() {
+  if (!state.geojson) return;
+  const panel  = document.getElementById('statsPanel');
+  const hasSel = state.selectedIds.size > 0;
+
+  function pctDiff(sv, av) {
+    if (!av) return '—';
+    const d = ((sv - av) / Math.abs(av)) * 100;
+    return (d >= 0 ? '+' : '') + d.toFixed(1) + '%';
+  }
+
+  function varBlock(varId) {
+    const vd      = getVarDef(varId);
+    const allVals = getValues(varId);
+    const all     = calcStats(allVals);
+    if (!all) return '';
+    const tag = varId === state.varX ? '▲' : '▼';
+
+    if (!hasSel) {
+      return `
+        <div class="stats-var-head">${tag} ${vd.label}</div>
+        <div class="stats-grid stats-grid--simple">
+          <span class="stats-label">n</span><span class="stats-val">${all.n.toLocaleString()}</span>
+          <span class="stats-label">Mean</span><span class="stats-val">${vd.fmt(all.mean)}</span>
+          <span class="stats-label">Median</span><span class="stats-val">${vd.fmt(all.median)}</span>
+          <span class="stats-label">Std dev</span><span class="stats-val">${vd.fmt(all.stddev)}</span>
+        </div>`;
+    }
+
+    const selFeatures = state.geojson.features.filter(f => state.selectedIds.has(featureId(f)));
+    const selVals     = getValuesFor(varId, selFeatures);
+    const sel         = calcStats(selVals);
+    if (!sel) return '';
+    const rows = [
+      { lbl: 'n',       a: all.n.toLocaleString(), s: sel.n.toLocaleString(), p: pctDiff(sel.n, all.n) },
+      { lbl: 'Mean',    a: vd.fmt(all.mean),        s: vd.fmt(sel.mean),        p: pctDiff(sel.mean, all.mean) },
+      { lbl: 'Median',  a: vd.fmt(all.median),      s: vd.fmt(sel.median),      p: pctDiff(sel.median, all.median) },
+      { lbl: 'Std dev', a: vd.fmt(all.stddev),      s: vd.fmt(sel.stddev),      p: pctDiff(sel.stddev, all.stddev) },
+    ];
+    return `
+      <div class="stats-var-head">${tag} ${vd.label}</div>
+      <div class="stats-grid">
+        <span class="stats-col-head"></span>
+        <span class="stats-col-head">All</span>
+        <span class="stats-col-head">Sel</span>
+        <span class="stats-col-head">Δ</span>
+        ${rows.map(r => `
+          <span class="stats-label">${r.lbl}</span>
+          <span class="stats-val">${r.a}</span>
+          <span class="stats-val">${r.s}</span>
+          <span class="stats-pct ${parseFloat(r.p) > 0 ? 'pos' : parseFloat(r.p) < 0 ? 'neg' : ''}">${r.p}</span>
+        `).join('')}
+      </div>`;
+  }
+
+  panel.innerHTML = varBlock(state.varX) + varBlock(state.varY);
+  panel.style.display = 'block';
+}
+
+// ============================================================
+//  STATUS BAR
+// ============================================================
+
+function updateStatus() {
+  const total = state.geojson ? state.geojson.features.length : 0;
+  const sel   = state.selectedIds.size;
+  document.getElementById('statusText').textContent = sel > 0
+    ? `${sel.toLocaleString()} of ${total.toLocaleString()} ${GEOGRAPHY_LABEL}s selected`
+    : `${total.toLocaleString()} ${GEOGRAPHY_LABEL}s · Shift+drag on a map or the scatterplot to select`;
+}
+
+// ============================================================
+//  SELECTION MANAGEMENT
+// ============================================================
+
+function showClearBtn(show) {
+  document.getElementById('clearBtn').style.display = show ? 'inline-block' : 'none';
+}
+
+function clearSelection() {
+  state.selectedIds.clear();
+  state.selMode = null;
+  showClearBtn(false);
+  BOTH_MAPS.forEach(applyColors);
+  drawScatter();
+  drawStats();
+  updateStatus();
+}
+
+// ============================================================
+//  VARIABLE & CLASSIFICATION CHANGES
+// ============================================================
+
+function onVarChange(mapId, varId) {
+  if (mapId === 'X') state.varX = varId; else state.varY = varId;
+  clearSelection();
+  const m = mapId === 'X' ? mapX : mapY;
+  drawTracts(m);
+  updateColorBtn(m);
+  updateDdWarn(m);
+  drawScatter();
+}
+
+function onSchemeChange(m, schemeId) {
+  if (m === mapX) state.schemeX = schemeId; else state.schemeY = schemeId;
+  clearSelection();
+  drawTracts(m);
+  updateColorBtn(m);
+  updateDdWarn(m);
+}
+
+function onClassChange(method) {
+  state.classification = method;
+  clearSelection();
+  BOTH_MAPS.forEach(drawTracts);
+}
+
+function onBucketChange(k) {
+  state.buckets = +k;
+  clearSelection();
+  BOTH_MAPS.forEach(drawTracts);
+  BOTH_MAPS.forEach(m => { refreshDropdownSwatches(m); updateColorBtn(m); });
+}
+
+// ============================================================
+//  PANEL DIVIDER
+// ============================================================
+
+function setupPanelDivider() {
+  const divider   = document.getElementById('panelDivider');
+  const mapsPanel = document.getElementById('mapsPanel');
+  const main      = document.getElementById('main');
+  let dragging = false;
+
+  divider.addEventListener('mousedown', e => {
+    dragging = true;
+    document.body.style.cursor     = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const rect = main.getBoundingClientRect();
+    const pct  = Math.min(Math.max((e.clientX - rect.left) / rect.width * 100, 25), 78);
+    mapsPanel.style.flex = `0 0 ${pct}%`;
+  });
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor     = '';
+    document.body.style.userSelect = '';
+    resizeAndRedraw();
+  });
+}
+
+// ============================================================
+//  RESIZE & REDRAW
+// ============================================================
+
+function resizeAndRedraw() {
+  state.zoomTransform = d3.zoomIdentity;
+  syncing = true;
+  BOTH_MAPS.forEach(m => m.svg.call(m.zoomBehavior.transform, d3.zoomIdentity));
+  syncing = false;
+  BOTH_MAPS.forEach(m => { resizeMap(m); drawTracts(m); });
+  resizeScatter();
+  drawScatter();
+}
+
+// ============================================================
+//  VALIDATION
+// ============================================================
+
+function validate(geojson) {
+  const errors = [];
+  if (!geojson.features || !geojson.features.length) {
+    errors.push('The GeoJSON file contains no features. Check that the file is valid GeoJSON.');
+    return errors;
+  }
+  const props = geojson.features[0].properties || {};
+  if (!(FEATURE_ID_FIELD in props))
+    errors.push(`FEATURE_ID_FIELD: property "${FEATURE_ID_FIELD}" was not found. Check the exact property name in your GeoJSON and update config.js.`);
+  if (FEATURE_NAME_FIELD && !(FEATURE_NAME_FIELD in props))
+    errors.push(`FEATURE_NAME_FIELD: property "${FEATURE_NAME_FIELD}" was not found.`);
+  VARIABLES.forEach(v => {
+    if (!(v.prop in props))
+      errors.push(`Variable "${v.label}": property "${v.prop}" was not found. Check that the prop name in config.js matches exactly.`);
+  });
+  return errors;
+}
+
+// ============================================================
+//  INIT
+// ============================================================
+
+async function init() {
+  document.getElementById('loadingMsg').style.display = 'flex';
+
+  let geojson;
+  try {
+    const res = await fetch(DATA_FILE);
+    if (!res.ok) throw new Error(`HTTP ${res.status} — could not load ${DATA_FILE}`);
+    geojson = await res.json();
+  } catch (err) {
+    document.getElementById('loadingMsg').innerHTML =
+      `<span class="load-error">⚠ Could not load data<br>${err.message}<br><br>` +
+      `Make sure you are serving the project from a local web server, not opening index.html directly as a file.</span>`;
+    return;
+  }
+
+  const errors = validate(geojson);
+  if (errors.length) {
+    document.getElementById('loadingMsg').innerHTML =
+      `<span class="load-error">⚠ Configuration errors in config.js:<br><br>` +
+      errors.map(e => `• ${e}`).join('<br>') + '</span>';
+    return;
+  }
+
+  state.geojson = geojson;
+  document.getElementById('loadingMsg').style.display = 'none';
+
+  // Variable dropdowns
+  [['varSelectX', DEFAULT_VAR_X], ['varSelectY', DEFAULT_VAR_Y]].forEach(([selId, def]) => {
+    const sel = document.getElementById(selId);
+    sel.innerHTML = '';
+    VARIABLES.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.id; opt.textContent = v.label;
+      if (v.id === def) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  });
+
+  document.getElementById('classSelect').value  = DEFAULT_CLASSIFICATION;
+  document.getElementById('bucketSelect').value = String(DEFAULT_BUCKETS);
+
+  document.getElementById('varSelectX').addEventListener('change', e => onVarChange('X', e.target.value));
+  document.getElementById('varSelectY').addEventListener('change', e => onVarChange('Y', e.target.value));
+  document.getElementById('classSelect').addEventListener('change', e => onClassChange(e.target.value));
+  document.getElementById('bucketSelect').addEventListener('change', e => onBucketChange(e.target.value));
+  document.getElementById('clearBtn').addEventListener('click', clearSelection);
+  document.getElementById('zoomIn').addEventListener('click',    () => zoomBy(2));
+  document.getElementById('zoomOut').addEventListener('click',   () => zoomBy(0.5));
+  document.getElementById('zoomReset').addEventListener('click', () => zoomReset());
+
+  BOTH_MAPS.forEach(m => {
+    document.getElementById(m.colorBtnId).addEventListener('click', e => {
+      e.stopPropagation();
+      toggleDropdown(m);
+    });
+    buildDropdown(m);
+    updateColorBtn(m);
+  });
+
+  document.addEventListener('click', () => BOTH_MAPS.forEach(closeDropdown));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') BOTH_MAPS.forEach(closeDropdown);
+  });
+
+  BOTH_MAPS.forEach(initMap);
+  setupZoomSync();
+  BOTH_MAPS.forEach(m => { resizeMap(m); drawTracts(m); setupLasso(m); });
+
+  drawStats();
+  initScatter();
+  drawScatter();
+
+  setupPanelDivider();
+  window.addEventListener('resize', resizeAndRedraw);
+
+  updateStatus();
+}
+
+window.addEventListener('DOMContentLoaded', init);

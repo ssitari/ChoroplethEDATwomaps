@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Choropleth EDA — Two Maps</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #edecea;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Toolbar ────────────────────────────────────────────────── */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      height: 44px;
+      background: #fff;
+      border-bottom: 0.5px solid #ddd;
+      flex-shrink: 0;
+      z-index: 200;
+    }
+    #toolbar h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #222;
+      white-space: nowrap;
+      margin-right: 2px;
+    }
+    .tb-sep {
+      width: 0.5px;
+      height: 20px;
+      background: #ddd;
+      flex-shrink: 0;
+    }
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-shrink: 0;
+    }
+    .ctrl-label {
+      font-size: 11px;
+      color: #888;
+      white-space: nowrap;
+    }
+    .map-tag {
+      font-size: 11px;
+      font-weight: 700;
+      color: #555;
+      white-space: nowrap;
+    }
+    select {
+      font-size: 12px;
+      padding: 3px 6px;
+      border: 0.5px solid #ccc;
+      border-radius: 4px;
+      background: #fafafa;
+      color: #222;
+      cursor: pointer;
+      height: 26px;
+    }
+    select:hover { border-color: #999; }
+    select:focus { outline: none; border-color: #4466cc; }
+
+    .spacer { flex: 1 1 0; }
+
+    /* ── Buttons ────────────────────────────────────────────────── */
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px; height: 26px;
+      border: 0.5px solid #ccc;
+      border-radius: 4px;
+      background: #fafafa;
+      font-size: 13px;
+      cursor: pointer;
+      color: #444;
+      user-select: none;
+    }
+    .icon-btn:hover { background: #eee; }
+
+    #clearBtn {
+      display: none;
+      font-size: 11px;
+      padding: 0 10px;
+      height: 26px;
+      border: 0.5px solid #e07b39;
+      border-radius: 4px;
+      background: #fff7f2;
+      color: #e07b39;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #clearBtn:hover { background: #ffe8d6; }
+
+    /* ── Color scheme buttons ────────────────────────────────────── */
+    .color-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 7px;
+      height: 26px;
+      border: 0.5px solid #ccc;
+      border-radius: 4px;
+      background: #fafafa;
+      cursor: pointer;
+      font-size: 11px;
+      color: #666;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .color-btn:hover, .color-btn.open { background: #eee; border-color: #999; }
+    .btn-swatches { display: flex; gap: 1px; }
+    .btn-swatch {
+      display: inline-block;
+      width: 10px; height: 14px;
+      border-radius: 1px;
+    }
+
+    /* ── Color scheme dropdown ───────────────────────────────────── */
+    .color-dropdown {
+      position: fixed;
+      background: #fff;
+      border: 0.5px solid #ddd;
+      border-radius: 6px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.13);
+      z-index: 500;
+      padding: 8px;
+      width: 224px;
+      display: none;
+    }
+    .color-dropdown.open { display: block; }
+    .dd-family-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #aaa;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 4px 2px 3px;
+    }
+    .dd-row {
+      display: flex;
+      gap: 2px;
+      padding: 3px 4px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .dd-row:hover { background: #f0efed; }
+    .dd-row--active { background: #e8eef8; }
+    .dd-swatch {
+      display: inline-block;
+      flex: 1;
+      height: 12px;
+      border-radius: 1px;
+    }
+    .dd-diverge-warn {
+      font-size: 9px;
+      color: #b05c0a;
+      padding: 4px 2px 0;
+      display: none;
+    }
+
+    /* ── Main area ───────────────────────────────────────────────── */
+    #main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    /* ── Maps panel (left) ───────────────────────────────────────── */
+    #mapsPanel {
+      flex: 0 0 62%;
+      display: flex;
+      flex-direction: column;
+      min-width: 260px;
+      overflow: hidden;
+    }
+
+    .map-pane {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      min-height: 0;
+      background: #fff;
+    }
+    .map-pane svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Thin gradient rule between the two maps */
+    #mapDivider {
+      flex: 0 0 1px;
+      background: linear-gradient(to right,
+        transparent 0%, #c4c0bc 12%, #c4c0bc 88%, transparent 100%);
+    }
+
+    /* ── Panel drag handle ───────────────────────────────────────── */
+    #panelDivider {
+      flex: 0 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: col-resize;
+      z-index: 10;
+    }
+    #panelDivider:hover { background: rgba(0,0,0,0.04); }
+    #panelDivider::after {
+      content: '';
+      display: block;
+      width: 3px;
+      height: 28px;
+      background: repeating-linear-gradient(
+        to bottom,
+        #c4c0bc 0px, #c4c0bc 3px,
+        transparent 3px, transparent 6px
+      );
+      border-radius: 2px;
+    }
+
+    /* ── Histogram / stats panel (right) ─────────────────────────── */
+    #histPanel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 180px;
+      overflow: hidden;
+      background: rgba(255,255,255,0.72);
+      box-shadow: -2px 0 10px rgba(0,0,0,0.07);
+    }
+    #scatterPane {
+      flex: 1;
+      min-height: 0;
+      padding: 14px 14px 4px;
+      position: relative;
+    }
+    #scatterPane svg { display: block; }
+
+    /* ── Floating legend ─────────────────────────────────────────── */
+    .legend {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      background: rgba(255,255,255,0.93);
+      border-radius: 6px;
+      padding: 7px 10px 8px;
+      box-shadow: 0 1px 8px rgba(0,0,0,0.11);
+      min-width: 126px;
+      z-index: 50;
+      pointer-events: none;
+    }
+    .legend-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 5px;
+      line-height: 1.3;
+    }
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+    .legend-swatch {
+      display: inline-block;
+      width: 14px; height: 10px;
+      border-radius: 1px;
+      flex-shrink: 0;
+    }
+    .legend-label { font-size: 10px; color: #555; }
+    .legend-warn {
+      font-size: 9px;
+      color: #b05c0a;
+      margin-top: 4px;
+      display: none;
+    }
+
+    /* ── Tooltip ─────────────────────────────────────────────────── */
+    #tooltip {
+      position: fixed;
+      background: rgba(18,16,14,0.88);
+      color: #f0efe8;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.55;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+      max-width: 210px;
+    }
+    .tip-group { color: #999; font-size: 11px; }
+    .tip-id    { font-weight: 600; }
+    .tip-tag   { font-size: 10px; color: #999; }
+    .tip-label { color: #aaa; font-size: 11px; }
+    .tip-val   { font-weight: 600; font-size: 13px; }
+    .tip-val-y { font-weight: 600; font-size: 13px; color: #e8c97a; }
+
+    /* ── Stats panel ─────────────────────────────────────────────── */
+    #statsPanel {
+      display: none;
+      padding: 8px 14px 12px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    .stats-var-head {
+      font-size: 10px;
+      font-weight: 700;
+      color: #555;
+      margin: 6px 0 3px;
+    }
+    .stats-var-head:first-child { margin-top: 0; }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 62px 1fr 1fr 44px;
+      row-gap: 1px;
+    }
+    .stats-grid--simple {
+      grid-template-columns: 62px 1fr;
+    }
+    .stats-col-head {
+      font-size: 9px;
+      color: #aaa;
+      text-align: right;
+      padding-bottom: 3px;
+    }
+    .stats-col-head:first-child { text-align: left; }
+    .stats-label { font-size: 10px; color: #777; }
+    .stats-val   { font-size: 10px; color: #333; text-align: right; }
+    .stats-pct   { font-size: 10px; text-align: right; }
+    .stats-pct.pos { color: #2a7a2a; }
+    .stats-pct.neg { color: #b03030; }
+
+    /* ── Status bar ──────────────────────────────────────────────── */
+    #statusBar {
+      height: 26px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      background: rgba(255,255,255,0.7);
+      border-top: 0.5px solid #ddd;
+      flex-shrink: 0;
+    }
+    #statusText { font-size: 11px; color: #888; }
+
+    /* ── Loading overlay ─────────────────────────────────────────── */
+    #loadingMsg {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(237,236,234,0.92);
+      z-index: 2000;
+      font-size: 13px;
+      color: #666;
+      gap: 10px;
+      text-align: center;
+      padding: 20px;
+    }
+    .load-error { color: #c0392b; font-size: 12px; max-width: 480px; line-height: 1.6; }
+
+    /* ── Selection mode indicator ────────────────────────────────── */
+    #selModeIndicator {
+      position: fixed;
+      top: 56px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26,24,22,0.78);
+      color: #f0efe8;
+      font-size: 11px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      pointer-events: none;
+      z-index: 300;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+
+    /* ── Shift hint ──────────────────────────────────────────────── */
+    #shiftHint {
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26,24,22,0.78);
+      color: #f0efe8;
+      font-size: 11px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      pointer-events: none;
+      z-index: 300;
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+    #shiftHint.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Toolbar ───────────────────────────────────────────────────── -->
+  <div id="toolbar">
+    <h1>Choropleth EDA — Two Maps</h1>
+    <div class="tb-sep"></div>
+
+    <div class="ctrl-group">
+      <span class="map-tag">Map ▲</span>
+      <select id="varSelectX"></select>
+    </div>
+    <button class="color-btn" id="colorBtnX">
+      <span class="btn-swatches" id="colorBtnSwatchesX"></span>▾
+    </button>
+
+    <div class="tb-sep"></div>
+
+    <div class="ctrl-group">
+      <span class="map-tag">Map ▼</span>
+      <select id="varSelectY"></select>
+    </div>
+    <button class="color-btn" id="colorBtnY">
+      <span class="btn-swatches" id="colorBtnSwatchesY"></span>▾
+    </button>
+
+    <div class="tb-sep"></div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">Class</span>
+      <select id="classSelect">
+        <option value="quantile">Quantile</option>
+        <option value="equal">Equal interval</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">k</span>
+      <select id="bucketSelect">
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5" selected>5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+      </select>
+    </div>
+
+    <div class="spacer"></div>
+
+    <button id="clearBtn">✕ Clear</button>
+    <div class="ctrl-group">
+      <button class="icon-btn" id="zoomOut" title="Zoom out">−</button>
+      <button class="icon-btn" id="zoomIn"  title="Zoom in">+</button>
+      <button class="icon-btn" id="zoomReset" title="Reset zoom">⊙</button>
+    </div>
+  </div>
+
+  <!-- Color scheme dropdowns (positioned via JS) -->
+  <div id="colorDropdownX" class="color-dropdown"></div>
+  <div id="colorDropdownY" class="color-dropdown"></div>
+
+  <!-- ── Main layout ────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Left: two stacked maps -->
+    <div id="mapsPanel">
+
+      <div class="map-pane" id="mapPaneX">
+        <svg id="mapSvgX"></svg>
+        <div class="legend" id="legendX">
+          <div class="legend-title" id="legendTitleX">—</div>
+          <div id="legendSwatchesX"></div>
+          <div class="legend-warn" id="legendWarnX">⚠ Diverging palette on non-diverging variable</div>
+        </div>
+      </div>
+
+      <div id="mapDivider"></div>
+
+      <div class="map-pane" id="mapPaneY">
+        <svg id="mapSvgY"></svg>
+        <div class="legend" id="legendY">
+          <div class="legend-title" id="legendTitleY">—</div>
+          <div id="legendSwatchesY"></div>
+          <div class="legend-warn" id="legendWarnY">⚠ Diverging palette on non-diverging variable</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Drag handle -->
+    <div id="panelDivider"></div>
+
+    <!-- Right: histograms + stats -->
+    <div id="histPanel">
+      <div id="scatterPane">
+        <svg id="scatterSvg"></svg>
+      </div>
+      <div id="statsPanel"></div>
+    </div>
+
+  </div>
+
+  <!-- ── Status bar ─────────────────────────────────────────────────── -->
+  <div id="statusBar">
+    <span id="statusText"></span>
+  </div>
+
+  <!-- ── Overlays ───────────────────────────────────────────────────── -->
+  <div id="tooltip"></div>
+  <div id="loadingMsg">Loading data…</div>
+  <div id="selModeIndicator"></div>
+  <div id="shiftHint">Shift + drag on either map to select</div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
