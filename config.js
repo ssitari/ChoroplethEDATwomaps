@@ -110,9 +110,19 @@ export const FEATURE_GROUP_FIELD = 'Area Name';
 //
 //    nullVal  A data value that should be treated as "no data".
 //             Features with this value receive the null color on the map
-//             and are excluded from statistics and histograms.
-//             Set to null to disable (no values treated as missing).
-//             Default assumption: 0 often means "no data" in GIS exports.
+//             and are excluded from statistics and the scatterplot.
+//
+//             Set to null when every value in the field is real — this is
+//             the right choice more often than it looks. Some GIS exports
+//             do use 0 to mean "no data", but for a great many variables
+//             (percent vacant, percent uninsured, counts of a rare event,
+//             net change) 0 is a genuine observation, and setting
+//             nullVal: 0 will silently delete those features from the map
+//             and from every statistic. When in doubt, set it to null and
+//             check the "No data" count in the legend against your source.
+//
+//             Values that are null, empty, or non-numeric in the data are
+//             always treated as missing regardless of this setting.
 //
 //    diverge  Set to true if the variable has a meaningful midpoint —
 //             for example: percent change, deviation from average, z-score,
@@ -128,7 +138,7 @@ export const VARIABLES = [
     prop:    'Percent Fully Vaccinated',
     fmt:     v => v.toFixed(1) + '%',
     unit:    '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
   {
@@ -137,7 +147,7 @@ export const VARIABLES = [
     prop:    'Percent With at Least One Dose',
     fmt:     v => v.toFixed(1) + '%',
     unit:    '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
   {
@@ -146,7 +156,7 @@ export const VARIABLES = [
     prop:    'Percent Over 65',
     fmt:     v => v.toFixed(1) + '%',
     unit:    '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
   {
@@ -155,7 +165,7 @@ export const VARIABLES = [
     prop:    'Percent White',
     fmt:     v => v.toFixed(1) + '%',
     unit:    '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
   {
@@ -164,7 +174,7 @@ export const VARIABLES = [
     prop:    'Percent Black',
     fmt:     v => v.toFixed(1) + '%',
     unit:    '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
   {
@@ -173,7 +183,7 @@ export const VARIABLES = [
     prop:    'Percent Hispanic',
     fmt:     v => v.toFixed(1) + '%',
     unit:    '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
 ];

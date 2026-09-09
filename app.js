@@ -121,11 +121,35 @@ function featureId(f) {
   return f.properties[FEATURE_ID_FIELD];
 }
 
+//  Reads one variable off one feature, returning null for anything that
+//  cannot be mapped. Everything downstream — scales, breaks, statistics,
+//  regression — assumes it is handed finite numbers, so all three ways a
+//  value can be unusable have to be caught here:
+//
+//    Missing      null or undefined in the properties, or an empty string.
+//
+//    Non-numeric  'N/A', 'null', '--' and similar survive a CSV join intact.
+//                 +'N/A' is NaN, which passes a plain != null filter, poisons
+//                 the statistics, and reaches colorScale(NaN) → undefined →
+//                 a path with no fill attribute, which SVG paints black.
+//
+//    Sentinel     the variable's configured nullVal. Tested with hasOwn, not
+//                 ??, so that nullVal: null genuinely disables the check
+//                 instead of falling back to 0 and swallowing every real zero
+//                 in the dataset. Compared numerically so a string '0' in the
+//                 data matches a numeric 0 in the config.
 function getFeatureValue(f, varId) {
   const vd = getVarDef(varId);
   const v  = f.properties[vd.prop];
-  const nv = vd.nullVal ?? 0;
-  return (v == null || v === nv) ? null : +v;
+  if (v == null || v === '') return null;
+
+  const n = +v;
+  if (!Number.isFinite(n)) return null;
+
+  const nv = Object.hasOwn(vd, 'nullVal') ? vd.nullVal : 0;
+  if (nv != null && n === +nv) return null;
+
+  return n;
 }
 
 function getValues(varId) {
