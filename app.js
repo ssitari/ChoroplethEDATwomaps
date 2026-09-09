@@ -492,76 +492,89 @@ function svgPoint(event, m) {
           (event.clientY - rect.top  - t.y) / t.k];
 }
 
+//  Only mousedown is bound to the map. The rest of the drag lives on the
+//  window, because a lasso drawn near the edge of a pane very often ends
+//  with the pointer outside it — and a mouseup bound to the SVG never fires
+//  in that case, leaving the drag permanently open: the mode badge stuck on
+//  screen and the lasso still following the cursor with no button held.
 function setupLasso(m) {
-  m.svg
-    .on('mousedown.sel', event => {
-      if (!event.shiftKey) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const mode = event.altKey ? 'rect' : 'lasso';
-      const pt   = svgPoint(event, m);
-      selDrag = { mode, map: m, points: [pt], startX: pt[0], startY: pt[1] };
-      showSelMode(mode);
-    })
-    .on('mousemove.sel', event => {
-      if (!selDrag || selDrag.map !== m) return;
-      event.preventDefault();
-      const pt = svgPoint(event, m);
-      selDrag.points.push(pt);
-      if (selDrag.mode === 'lasso') {
-        const closed = [...selDrag.points, selDrag.points[0]];
-        m.brushG.select('.sel-path')
-          .attr('d', 'M' + closed.map(p => p.join(',')).join('L') + 'Z')
-          .attr('fill', 'rgba(70,110,240,0.07)')
-          .attr('stroke', '#4466cc').attr('stroke-width', 1.5)
-          .attr('stroke-dasharray', '5,3').attr('stroke-linejoin', 'round');
-      } else {
-        const x0 = Math.min(selDrag.startX, pt[0]), y0 = Math.min(selDrag.startY, pt[1]);
-        const w  = Math.abs(pt[0] - selDrag.startX), h = Math.abs(pt[1] - selDrag.startY);
-        m.brushG.select('.sel-rect').style('display', null)
-          .attr('x', x0).attr('y', y0).attr('width', w).attr('height', h);
-        m.brushG.select('.sel-path')
-          .attr('d', `M${x0},${y0}h${w}v${h}h${-w}Z`)
-          .attr('fill', 'none').attr('stroke', '#4466cc')
-          .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3');
-      }
-    })
-    .on('mouseup.sel', event => {
-      if (!selDrag || selDrag.map !== m) return;
-      const drag = selDrag;
-      selDrag = null;
-      hideSelMode();
+  m.svg.on('mousedown.sel', event => {
+    if (!event.shiftKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const mode = event.altKey ? 'rect' : 'lasso';
+    const pt   = svgPoint(event, m);
+    selDrag = { mode, map: m, points: [pt], startX: pt[0], startY: pt[1] };
+    showSelMode(mode);
+  });
+}
 
-      const poly = drag.mode === 'lasso'
-        ? drag.points
-        : (() => {
-            const pt = svgPoint(event, m);
-            const x0 = Math.min(drag.startX, pt[0]), y0 = Math.min(drag.startY, pt[1]);
-            const x1 = Math.max(drag.startX, pt[0]), y1 = Math.max(drag.startY, pt[1]);
-            return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
-          })();
+function dragLassoTo(event) {
+  const m  = selDrag.map;
+  const pt = svgPoint(event, m);
+  selDrag.points.push(pt);
+  if (selDrag.mode === 'lasso') {
+    const closed = [...selDrag.points, selDrag.points[0]];
+    m.brushG.select('.sel-path')
+      .attr('d', 'M' + closed.map(p => p.join(',')).join('L') + 'Z')
+      .attr('fill', 'rgba(70,110,240,0.07)')
+      .attr('stroke', '#4466cc').attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '5,3').attr('stroke-linejoin', 'round');
+  } else {
+    const x0 = Math.min(selDrag.startX, pt[0]), y0 = Math.min(selDrag.startY, pt[1]);
+    const w  = Math.abs(pt[0] - selDrag.startX), h = Math.abs(pt[1] - selDrag.startY);
+    m.brushG.select('.sel-rect').style('display', null)
+      .attr('x', x0).attr('y', y0).attr('width', w).attr('height', h);
+    m.brushG.select('.sel-path')
+      .attr('d', `M${x0},${y0}h${w}v${h}h${-w}Z`)
+      .attr('fill', 'none').attr('stroke', '#4466cc')
+      .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3');
+  }
+}
 
-      if (poly.length < 3) { clearSelPath(m); return; }
+function finishLasso(event) {
+  const drag = selDrag;
+  const m    = drag.map;
+  selDrag = null;
+  hideSelMode();
 
-      state.selectedIds.clear();
-      state.selMode = 'map' + m.id;
-      state.geojson.features.forEach(f => {
-        const c = m.pathGen.centroid(f);
-        if (!isNaN(c[0]) && d3.polygonContains(poly, c))
-          state.selectedIds.add(featureId(f));
-      });
+  const poly = drag.mode === 'lasso'
+    ? drag.points
+    : (() => {
+        const pt = svgPoint(event, m);
+        const x0 = Math.min(drag.startX, pt[0]), y0 = Math.min(drag.startY, pt[1]);
+        const x1 = Math.max(drag.startX, pt[0]), y1 = Math.max(drag.startY, pt[1]);
+        return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
+      })();
 
-      m.brushG.select('.sel-path').attr('stroke-dasharray', null)
-        .attr('fill', 'rgba(70,110,240,0.09)');
-      m.brushG.select('.sel-rect').style('display', 'none');
-      setTimeout(() => clearSelPath(m), 600);
+  if (poly.length < 3) { clearSelPath(m); return; }
 
-      showClearBtn(state.selectedIds.size > 0);
-      BOTH_MAPS.forEach(applyColors);
-      drawScatter();
-      drawStats();
-      updateStatus();
-    });
+  state.selectedIds.clear();
+  state.selMode = 'map' + m.id;
+  state.geojson.features.forEach(f => {
+    const c = m.pathGen.centroid(f);
+    if (!isNaN(c[0]) && d3.polygonContains(poly, c))
+      state.selectedIds.add(featureId(f));
+  });
+
+  m.brushG.select('.sel-path').attr('stroke-dasharray', null)
+    .attr('fill', 'rgba(70,110,240,0.09)');
+  m.brushG.select('.sel-rect').style('display', 'none');
+  setTimeout(() => clearSelPath(m), 600);
+
+  showClearBtn(state.selectedIds.size > 0);
+  BOTH_MAPS.forEach(applyColors);
+  drawScatter();
+  drawStats();
+  updateStatus();
+}
+
+function cancelLasso() {
+  if (!selDrag) return;
+  const m = selDrag.map;
+  selDrag = null;
+  hideSelMode();
+  clearSelPath(m);
 }
 
 function clearSelPath(m) {
@@ -795,82 +808,120 @@ function svgPointScatter(event) {
           event.clientY - r.top  - SM.top];
 }
 
+//  Same split as the map lasso: mousedown here, the rest on the window.
+let scDrag = null;
+
 function setupScatterLasso() {
-  let scDrag = null;
+  scSvg.on('mousedown.sel', event => {
+    if (!event.shiftKey) return;
+    event.preventDefault();
+    const mode = event.altKey ? 'rect' : 'lasso';
+    const pt   = svgPointScatter(event);
+    scDrag = { mode, points: [pt], startX: pt[0], startY: pt[1] };
+    showSelMode(mode);
+  });
+}
 
-  scSvg
-    .on('mousedown.sel', event => {
-      if (!event.shiftKey) return;
-      event.preventDefault();
-      const mode = event.altKey ? 'rect' : 'lasso';
-      const pt   = svgPointScatter(event);
-      scDrag = { mode, points: [pt], startX: pt[0], startY: pt[1] };
-      showSelMode(mode);
-    })
-    .on('mousemove.sel', event => {
-      if (!scDrag) return;
-      event.preventDefault();
-      const pt = svgPointScatter(event);
-      scDrag.points.push(pt);
-      if (scDrag.mode === 'lasso') {
-        const closed = [...scDrag.points, scDrag.points[0]];
-        scBrushG.select('.sc-sel-path')
-          .attr('d', 'M' + closed.map(p => p.join(',')).join('L') + 'Z')
-          .attr('fill', 'rgba(70,110,240,0.07)')
-          .attr('stroke', '#4466cc').attr('stroke-width', 1.5)
-          .attr('stroke-dasharray', '5,3').attr('stroke-linejoin', 'round');
-      } else {
-        const x0 = Math.min(scDrag.startX, pt[0]), y0 = Math.min(scDrag.startY, pt[1]);
-        const w  = Math.abs(pt[0] - scDrag.startX), h = Math.abs(pt[1] - scDrag.startY);
-        scBrushG.select('.sc-sel-rect').style('display', null)
-          .attr('x', x0).attr('y', y0).attr('width', w).attr('height', h);
-        scBrushG.select('.sc-sel-path')
-          .attr('d', `M${x0},${y0}h${w}v${h}h${-w}Z`)
-          .attr('fill', 'none').attr('stroke', '#4466cc')
-          .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3');
-      }
-    })
-    .on('mouseup.sel', event => {
-      if (!scDrag) return;
-      const drag = scDrag;
-      scDrag = null;
-      hideSelMode();
+function dragScatterLassoTo(event) {
+  const pt = svgPointScatter(event);
+  scDrag.points.push(pt);
+  if (scDrag.mode === 'lasso') {
+    const closed = [...scDrag.points, scDrag.points[0]];
+    scBrushG.select('.sc-sel-path')
+      .attr('d', 'M' + closed.map(p => p.join(',')).join('L') + 'Z')
+      .attr('fill', 'rgba(70,110,240,0.07)')
+      .attr('stroke', '#4466cc').attr('stroke-width', 1.5)
+      .attr('stroke-dasharray', '5,3').attr('stroke-linejoin', 'round');
+  } else {
+    const x0 = Math.min(scDrag.startX, pt[0]), y0 = Math.min(scDrag.startY, pt[1]);
+    const w  = Math.abs(pt[0] - scDrag.startX), h = Math.abs(pt[1] - scDrag.startY);
+    scBrushG.select('.sc-sel-rect').style('display', null)
+      .attr('x', x0).attr('y', y0).attr('width', w).attr('height', h);
+    scBrushG.select('.sc-sel-path')
+      .attr('d', `M${x0},${y0}h${w}v${h}h${-w}Z`)
+      .attr('fill', 'none').attr('stroke', '#4466cc')
+      .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,3');
+  }
+}
 
-      const poly = drag.mode === 'lasso'
-        ? drag.points
-        : (() => {
-            const pt = svgPointScatter(event);
-            const x0 = Math.min(drag.startX, pt[0]), y0 = Math.min(drag.startY, pt[1]);
-            const x1 = Math.max(drag.startX, pt[0]), y1 = Math.max(drag.startY, pt[1]);
-            return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
-          })();
+function finishScatterLasso(event) {
+  const drag = scDrag;
+  scDrag = null;
+  hideSelMode();
 
-      if (poly.length < 3) { clearScatterSelPath(); return; }
+  const poly = drag.mode === 'lasso'
+    ? drag.points
+    : (() => {
+        const pt = svgPointScatter(event);
+        const x0 = Math.min(drag.startX, pt[0]), y0 = Math.min(drag.startY, pt[1]);
+        const x1 = Math.max(drag.startX, pt[0]), y1 = Math.max(drag.startY, pt[1]);
+        return [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
+      })();
 
-      state.selectedIds.clear();
-      state.selMode = 'scatter';
+  if (poly.length < 3) { clearScatterSelPath(); return; }
 
-      if (scXScale && scYScale) {
-        state.geojson.features.forEach(f => {
-          const x = getFeatureValue(f, state.varX);
-          const y = getFeatureValue(f, state.varY);
-          if (x == null || y == null) return;
-          if (d3.polygonContains(poly, [scXScale(x), scYScale(y)]))
-            state.selectedIds.add(featureId(f));
-        });
-      }
+  state.selectedIds.clear();
+  state.selMode = 'scatter';
 
-      scBrushG.select('.sc-sel-path').attr('stroke-dasharray', null)
-        .attr('fill', 'rgba(70,110,240,0.09)');
-      scBrushG.select('.sc-sel-rect').style('display', 'none');
-      setTimeout(clearScatterSelPath, 600);
-
-      showClearBtn(state.selectedIds.size > 0);
-      BOTH_MAPS.forEach(applyColors);
-      drawScatter();
-      drawStats();
-      updateStatus();
+  if (scXScale && scYScale) {
+    state.geojson.features.forEach(f => {
+      const x = getFeatureValue(f, state.varX);
+      const y = getFeatureValue(f, state.varY);
+      if (x == null || y == null) return;
+      if (d3.polygonContains(poly, [scXScale(x), scYScale(y)]))
+        state.selectedIds.add(featureId(f));
     });
+  }
+
+  scBrushG.select('.sc-sel-path').attr('stroke-dasharray', null)
+    .attr('fill', 'rgba(70,110,240,0.09)');
+  scBrushG.select('.sc-sel-rect').style('display', 'none');
+  setTimeout(clearScatterSelPath, 600);
+
+  showClearBtn(state.selectedIds.size > 0);
+  BOTH_MAPS.forEach(applyColors);
+  drawScatter();
+  drawStats();
+  updateStatus();
+}
+
+function cancelScatterLasso() {
+  if (!scDrag) return;
+  scDrag = null;
+  hideSelMode();
+  clearScatterSelPath();
+}
+
+// ============================================================
+//  DRAG LIFECYCLE
+//  One set of window-level handlers drives both lassos, so a drag that
+//  leaves its pane still tracks and still completes on release. Escape
+//  abandons the drag cleanly.
+//
+//  Shift is deliberately not rechecked here: people routinely let go of
+//  the modifier a moment before the mouse button, and cancelling on that
+//  would throw away the selection they just finished drawing.
+// ============================================================
+
+function setupDragLifecycle() {
+  window.addEventListener('mousemove', event => {
+    if (!selDrag && !scDrag) return;
+    // No buttons held means the release happened somewhere that swallowed
+    // the event — another window, or a native context menu.
+    if (event.buttons === 0) { cancelLasso(); cancelScatterLasso(); return; }
+    event.preventDefault();
+    if (selDrag) dragLassoTo(event);
+    if (scDrag)  dragScatterLassoTo(event);
+  });
+
+  window.addEventListener('mouseup', event => {
+    if (selDrag) finishLasso(event);
+    if (scDrag)  finishScatterLasso(event);
+  });
+
+  window.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { cancelLasso(); cancelScatterLasso(); }
+  });
 }
 
 function clearScatterSelPath() {
@@ -1157,6 +1208,7 @@ async function init() {
 
   BOTH_MAPS.forEach(initMap);
   setupZoomSync();
+  setupDragLifecycle();
   BOTH_MAPS.forEach(m => { resizeMap(m); drawTracts(m); setupLasso(m); });
 
   drawStats();
