@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Choropleth EDA — Two Maps</title>
+  <!-- Placeholder only; the real title is set from PAGE_TITLE in config.js -->
+  <title>Choropleth EDA</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -415,7 +416,7 @@
 
   <!-- ── Toolbar ───────────────────────────────────────────────────── -->
   <div id="toolbar">
-    <h1>Choropleth EDA — Two Maps</h1>
+    <h1 id="appTitle"></h1>
     <div class="tb-sep"></div>
 
     <div class="ctrl-group">
@@ -532,17 +533,11 @@
     }
     .page-credit a { color: #52514e; }
   </style>
-  <footer class="page-credit">
-    Demo data: NYC DOHMH
-    <a href="https://github.com/nychealth/covid-vaccine-data" rel="noopener" target="_blank">COVID-19 Vaccine Data</a>.
-    Source code, method notes and full citations:
-    <a href="https://github.com/ssitari/ChoroplethEDATwomaps" rel="noopener" target="_blank">ssitari/ChoroplethEDATwomaps</a>.
-  </footer>
+  <!-- Filled from DATA_CREDIT_HTML in config.js -->
+  <footer class="page-credit" id="pageCredit"></footer>
 
   <script type="module" src="app.js"></script>
 
-  <!-- Cloudflare Web Analytics -->
-  <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "8bd0b9cc3d344a979211402c2f0108ee"}'></script>
-  <!-- End Cloudflare Web Analytics -->
+  <!-- Web analytics are injected by app.js from ANALYTICS_TOKEN in config.js -->
 </body>
 </html>

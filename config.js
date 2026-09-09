@@ -14,7 +14,8 @@
 //  3. Set GEOGRAPHY_LABEL to describe one feature (e.g. 'tract', 'county')
 //  4. Update the four identity fields to match your GeoJSON properties
 //  5. Replace the VARIABLES array with your own numeric fields
-//  6. Serve the folder with a local web server and open in a browser
+//  6. Set PAGE_TITLE and DATA_CREDIT_HTML, and clear ANALYTICS_TOKEN
+//  7. Serve the folder with a local web server and open in a browser
 //
 //  LOCAL SERVER OPTIONS
 //  Browsers block direct file:// access to data — you need a server:
@@ -23,6 +24,39 @@
 //    VS Code: Live Server extension → right-click index.html → Open with Live Server
 //
 // ============================================================
+
+
+// ── Page identity ───────────────────────────────────────────────────────
+//
+//  PAGE_TITLE
+//    Shown in the browser tab and in the toolbar heading. Keep it short —
+//    the toolbar is a single unwrapped row on desktop.
+//
+//  DATA_CREDIT_HTML
+//    The footer line on the published page. This is the one thing a reader
+//    who arrives cold has to work from, so it should name the actual source
+//    of your data and link to it. Inline HTML is allowed so you can include
+//    links. Set to null to hide the footer entirely.
+//
+//    Never leave the demo credit in place over your own data — it will
+//    attribute your map to NYC DOHMH.
+//
+//  ANALYTICS_TOKEN
+//    Cloudflare Web Analytics site token, or null for no analytics.
+//    If you copied this repository, the token below is NOT yours: it
+//    belongs to the original author's account and your traffic would be
+//    reported there. Replace it with your own or set it to null.
+//
+export const PAGE_TITLE = 'Choropleth EDA — Two Maps';
+
+export const DATA_CREDIT_HTML = `
+  Demo data: NYC DOHMH
+  <a href="https://github.com/nychealth/covid-vaccine-data" rel="noopener" target="_blank">COVID-19 Vaccine Data</a>.
+  Source code, method notes and full citations:
+  <a href="https://github.com/ssitari/ChoroplethEDATwomaps" rel="noopener" target="_blank">ssitari/ChoroplethEDATwomaps</a>.
+`;
+
+export const ANALYTICS_TOKEN = '8bd0b9cc3d344a979211402c2f0108ee';
 
 
 // ── Data file ───────────────────────────────────────────────────────────

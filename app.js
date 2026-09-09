@@ -4,6 +4,7 @@
 // ============================================================
 
 import {
+  PAGE_TITLE, DATA_CREDIT_HTML, ANALYTICS_TOKEN,
   DATA_FILE, GEOGRAPHY_LABEL, FEATURE_ID_FIELD,
   FEATURE_NAME_FIELD, FEATURE_GROUP_FIELD,
   VARIABLES, DEFAULT_VAR_X, DEFAULT_VAR_Y,
@@ -11,6 +12,39 @@ import {
   DEFAULT_SCHEME_X, DEFAULT_SCHEME_Y,
   NULL_COLOR, SELECTION_COLOR, DEEMPHASIS_OPACITY,
 } from './config.js';
+
+// ============================================================
+//  PAGE IDENTITY
+//  Title, footer credit and analytics all come from config.js so that
+//  adapting the tool to new data never requires editing index.html.
+//  Run before the data fetch, so the page is correctly labelled even
+//  when loading fails.
+// ============================================================
+
+function applyPageIdentity() {
+  if (PAGE_TITLE) {
+    document.title = PAGE_TITLE;
+    document.getElementById('appTitle').textContent = PAGE_TITLE;
+  }
+
+  const footer = document.getElementById('pageCredit');
+  if (DATA_CREDIT_HTML && DATA_CREDIT_HTML.trim()) {
+    footer.innerHTML = DATA_CREDIT_HTML;
+  } else {
+    footer.remove();
+  }
+
+  // Injected rather than hardcoded in index.html: a copied repository that
+  // kept the original tag would silently report its traffic to someone
+  // else's account.
+  if (ANALYTICS_TOKEN) {
+    const s = document.createElement('script');
+    s.defer = true;
+    s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
+    s.setAttribute('data-cf-beacon', JSON.stringify({ token: ANALYTICS_TOKEN }));
+    document.body.appendChild(s);
+  }
+}
 
 // ============================================================
 //  COLORBREWER PALETTE CATALOGUE
@@ -1057,6 +1091,7 @@ function validate(geojson) {
 // ============================================================
 
 async function init() {
+  applyPageIdentity();
   document.getElementById('loadingMsg').style.display = 'flex';
 
   let geojson;
