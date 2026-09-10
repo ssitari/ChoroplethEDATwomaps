@@ -19,12 +19,16 @@
     }
 
     /* ── Toolbar ────────────────────────────────────────────────── */
+    /* Wraps rather than overflowing. The controls used to run off the right
+       edge on any narrow window, and because the body does not scroll they
+       were unreachable — including the second map's variable selector. */
     #toolbar {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 10px;
-      padding: 0 14px;
-      height: 44px;
+      gap: 8px 10px;
+      padding: 6px 14px;
+      min-height: 44px;
       background: #fff;
       border-bottom: 0.5px solid #ddd;
       flex-shrink: 0;
@@ -417,6 +421,55 @@
       transition: opacity 0.4s;
     }
     #shiftHint.visible { opacity: 1; }
+
+    /* ── Touch note ──────────────────────────────────────────────── */
+    /* Lasso and rectangle selection are shift+drag, which has no touch
+       equivalent. Rather than let the central interaction fail silently on
+       a phone, say so — panning, zooming and tapping for detail all work. */
+    #touchNote { display: none; }
+    @media (pointer: coarse) {
+      #touchNote {
+        display: block;
+        flex-shrink: 0;
+        padding: 6px 14px;
+        background: #fdf6ec;
+        border-bottom: 0.5px solid #ecdcc4;
+        font-size: 11px;
+        line-height: 1.4;
+        color: #7a6a51;
+      }
+    }
+
+    /* ── Narrow screens ──────────────────────────────────────────── */
+    /* Below this width the side-by-side split leaves the scatterplot too
+       narrow to read, so the panels stack and the page scrolls. The panes
+       need explicit heights here: flex:1 has nothing to divide once the
+       column is taller than the viewport. */
+    @media (max-width: 820px) {
+      body {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+      }
+      #main { flex-direction: column; overflow: visible; }
+      #mapsPanel {
+        flex: none;
+        width: 100%;
+        min-width: 0;
+      }
+      .map-pane { flex: none; height: 42vh; min-height: 260px; }
+      #panelDivider { display: none; }
+      #histPanel {
+        flex: none;
+        width: 100%;
+        min-width: 0;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.07);
+      }
+      #scatterPane { flex: none; height: 62vh; min-height: 320px; }
+      #statsPanel  { overflow-y: visible; }
+      #statusBar   { height: auto; padding: 6px 14px; }
+      #statusText  { line-height: 1.4; }
+    }
   </style>
 </head>
 <body>
@@ -473,6 +526,13 @@
       <button class="icon-btn" id="zoomIn"  title="Zoom in">+</button>
       <button class="icon-btn" id="zoomReset" title="Reset zoom">⊙</button>
     </div>
+  </div>
+
+  <!-- Shown only to touch pointers; see the #touchNote rule above -->
+  <div id="touchNote">
+    Selection needs a mouse — the lasso and rectangle tools use shift+drag,
+    which has no touch equivalent. Panning, zooming and tapping a feature for
+    its values all work here.
   </div>
 
   <!-- Color scheme dropdowns (positioned via JS) -->
