@@ -25,6 +25,8 @@ Built with [D3.js](https://d3js.org). No build step required — plain HTML, CSS
 - **Draggable panel divider** — the split between the map area and the right panel can be repositioned by dragging
 - **ColorBrewer palette picker** — 18 sequential and 9 diverging schemes per map, with a warning when a diverging scheme is applied to a non-diverging variable
 - **Classification controls** — toggle between quantile and equal-interval; choose 3–8 classes, applied to both maps simultaneously
+- **Configuration checking** — `config.js` is validated against itself and against the loaded data before anything is drawn, naming the specific setting at fault rather than failing silently or drawing an empty map
+- **Responsive layout** — the panels stack below 820px; selection needs a mouse, and the page says so to touch devices
 
 ---
 
@@ -35,6 +37,7 @@ project/
 ├── index.html          # Layout and controls — do not edit
 ├── app.js              # Visualization engine — do not edit
 ├── config.js           # ← Edit this to use your own data
+├── LICENSE             # MIT
 └── data/
     └── *.geojson       # Drop your GeoJSON file here
 ```
@@ -50,7 +53,7 @@ Your file must meet these requirements before loading:
 - **Coordinate system: WGS 84 (EPSG:4326)** — standard lat/lng decimal degrees. If your file uses a projected CRS (e.g. State Plane feet, UTM metres) you must reproject it first. [QGIS](https://qgis.org) and the Python `pyproj` library can both do this.
 - **Geometry types: Polygon or MultiPolygon** only
 - **All variables must be pre-computed numeric fields** in the feature properties. The tool does not perform calculations — prepare percentages, rates, and derived fields in your data before loading.
-- **A unique ID field** — one property that is a unique integer or string identifier per feature (e.g. FIPS code, GEOID, an auto-incremented `fid`)
+- **A unique ID field** — one property that is a unique integer or string identifier per feature (e.g. FIPS code, GEOID, an auto-incremented `fid`). Uniqueness is checked at load and is not optional: the ID is the join key, so duplicates make features vanish from the map and break selection.
 - **No null geometries** — features with missing or empty geometries should be removed before loading
 
 A good workflow for preparation is QGIS (for reprojection and field calculation) or GeoPandas in Python. See [Data preparation notes](#data-preparation-notes) below.
@@ -61,7 +64,26 @@ Copy your GeoJSON file into the `data/` folder.
 
 ### 3. Edit config.js
 
-Open `config.js` and update the top section:
+Open `config.js` and work down it. The first block is what the published
+page says about itself:
+
+```javascript
+export const PAGE_TITLE = 'Vacancy and Rent Burden by Tract';
+
+// Footer credit. Inline HTML is allowed so you can link the source.
+// Never leave the demo credit in place over your own data.
+export const DATA_CREDIT_HTML = `
+  Data: <a href="https://example.org/source">Source name</a>.
+  Code: <a href="https://github.com/you/your-repo">you/your-repo</a>.
+`;
+
+// Cloudflare Web Analytics site token, or null for none.
+// The token in the repository is the original author's — replace it or
+// set it to null, or your traffic is reported to someone else's account.
+export const ANALYTICS_TOKEN = null;
+```
+
+Then the data itself:
 
 ```javascript
 export const DATA_FILE = './data/YourFile.geojson';
@@ -85,19 +107,20 @@ Then replace the `VARIABLES` array with entries for your own fields:
 export const VARIABLES = [
   {
     id:      'med_income',                // unique key, no spaces
-    label:   'Median Household Income',   // shown in dropdowns, axes, and tooltip
-    prop:    'MED_HH_INC',               // exact property name in your GeoJSON
-    fmt:     v => '$' + Math.round(v).toLocaleString(),  // tooltip/stats formatting
-    nullVal: 0,                           // treat this value as "no data"
-    diverge: false,                       // set true for variables with a meaningful midpoint
+    label:   'Median Household Income',   // dropdowns, legend title, axis, tooltip
+    prop:    'MED_HH_INC',                // exact property name in your GeoJSON
+    fmt:     v => '$' + Math.round(v).toLocaleString(),  // used everywhere values
+                                          // are shown, including legend breaks
+    nullVal: null,                        // a value to treat as "no data", or null
+    diverge: false,                       // true for variables with a meaningful midpoint
                                           // (e.g. percent change, z-score)
   },
   {
-    id:      'pct_college',
-    label:   'Percent College Educated',
-    prop:    'PCT_COLLEGE',
+    id:      'pct_vacant',
+    label:   'Percent Vacant Housing',
+    prop:    'PCT_VACANT',
     fmt:     v => v.toFixed(1) + '%',
-    nullVal: 0,
+    nullVal: null,
     diverge: false,
   },
   // Add as many variables as you like — any two can be assigned to Map ▲ and Map ▼
@@ -108,7 +131,7 @@ Finally set your defaults:
 
 ```javascript
 export const DEFAULT_VAR_X          = 'med_income';   // variable shown on Map ▲ at load
-export const DEFAULT_VAR_Y          = 'pct_college';  // variable shown on Map ▼ at load
+export const DEFAULT_VAR_Y          = 'pct_vacant';   // variable shown on Map ▼ at load
 export const DEFAULT_CLASSIFICATION = 'quantile';     // 'quantile' | 'equal'
 export const DEFAULT_BUCKETS        = 5;              // 3–8
 export const DEFAULT_SCHEME_X       = 'BuGn';         // palette for Map ▲
@@ -133,6 +156,22 @@ npx serve your-project-folder
 
 **VS Code:** Install the "Live Server" extension → right-click `index.html` → Open with Live Server.
 
+### 5. Before you publish your copy
+
+Four things in this repository are specific to the original and will follow
+your copy unless you change them:
+
+- **`ANALYTICS_TOKEN`** — the Cloudflare Web Analytics token belongs to the
+  original author's account. Replace it with your own or set it to `null`.
+- **`DATA_CREDIT_HTML`** — the demo footer credits NYC DOHMH. Left in place
+  over your data it misattributes your map.
+- **`PAGE_TITLE`** — appears in the browser tab and the toolbar.
+- **`data/MODZCTAS_Vaccine_2021.geojson`** — delete the demo file once your
+  own data loads.
+
+Everything above lives in `config.js`. You should not need to touch
+`index.html` or `app.js` to publish your own map.
+
 ---
 
 ## Interaction reference
@@ -143,6 +182,7 @@ npx serve your-project-folder
 | Shift + Alt + drag on either map | Rectangle selection of features |
 | Shift + drag on scatterplot | Freehand lasso selection of points |
 | Shift + Alt + drag on scatterplot | Rectangle selection of points |
+| Escape while dragging | Abandon the selection in progress |
 | Scroll wheel on map | Zoom in/out (mirrors to both maps) |
 | Drag on map (no Shift) | Pan (mirrors to both maps) |
 | +/− buttons | Zoom in/out |
@@ -216,6 +256,14 @@ Tolerance values around 0.0002–0.0005 degrees work well for city/regional data
 
 Classification and class count apply to both maps simultaneously.
 
+**Tied values.** Quantile breaks collapse when many features share the same
+value — common for a rate that is zero across most small geographies, or a
+rounded percentage. Rather than list classes the map cannot draw, the tool
+drops the duplicate breaks and notes the result in the legend, e.g.
+*2 of 5 classes — tied values*. If you see that note, either lower k or
+switch to equal interval; the underlying data simply does not support the
+number of classes you asked for.
+
 ---
 
 ## Color schemes
@@ -275,4 +323,4 @@ Most of the code written with assistance from [Claude](https://claude.ai) (Anthr
 
 ## License
 
-MIT — free to use, adapt, and redistribute with attribution.
+MIT — free to use, adapt, and redistribute with attribution. See [LICENSE](LICENSE).
