@@ -1119,21 +1119,115 @@ function resizeAndRedraw() {
 //  VALIDATION
 // ============================================================
 
+function showErrors(heading, errors) {
+  document.getElementById('loadingMsg').innerHTML =
+    `<span class="load-error">⚠ ${heading}:<br><br>` +
+    errors.map(e => `• ${e}`).join('<br><br>') + '</span>';
+}
+
+//  Checks config.js against itself, before any data is loaded. These are all
+//  settings that used to fail silently or half-apply: a DEFAULT_BUCKETS
+//  outside the dropdown's range left the control showing one number while
+//  the map drew another, and a DEFAULT_VAR_X naming no variable fell back to
+//  VARIABLES[0] while the dropdown disagreed.
+function validateConfig() {
+  const errors = [];
+
+  if (!Array.isArray(VARIABLES) || !VARIABLES.length) {
+    errors.push('VARIABLES is empty. Define at least one variable.');
+    return errors;
+  }
+
+  const ids = new Set();
+  VARIABLES.forEach((v, i) => {
+    const where = v.label || v.id || `entry ${i + 1}`;
+    if (!v.id)                       errors.push(`Variable "${where}": missing id.`);
+    else if (ids.has(v.id))          errors.push(`Variable id "${v.id}" is used more than once. Ids must be unique.`);
+    else                             ids.add(v.id);
+    if (!v.prop)                     errors.push(`Variable "${where}": missing prop (the GeoJSON property name).`);
+    if (typeof v.fmt !== 'function') errors.push(`Variable "${where}": fmt must be a function, e.g. v => v.toFixed(1) + '%'.`);
+  });
+
+  [['DEFAULT_VAR_X', DEFAULT_VAR_X], ['DEFAULT_VAR_Y', DEFAULT_VAR_Y]].forEach(([name, val]) => {
+    if (!ids.has(val))
+      errors.push(`${name} is "${val}", which is not an id in VARIABLES. Available ids: ${[...ids].join(', ')}.`);
+  });
+
+  if (!['quantile', 'equal'].includes(DEFAULT_CLASSIFICATION))
+    errors.push(`DEFAULT_CLASSIFICATION is "${DEFAULT_CLASSIFICATION}". Use 'quantile' or 'equal'.`);
+
+  if (!Number.isInteger(DEFAULT_BUCKETS) || DEFAULT_BUCKETS < 3 || DEFAULT_BUCKETS > 8)
+    errors.push(`DEFAULT_BUCKETS is ${DEFAULT_BUCKETS}. Use a whole number from 3 to 8.`);
+
+  [['DEFAULT_SCHEME_X', DEFAULT_SCHEME_X], ['DEFAULT_SCHEME_Y', DEFAULT_SCHEME_Y]].forEach(([name, val]) => {
+    if (!ALL_SCHEMES.some(s => s.id === val))
+      errors.push(`${name} is "${val}", which is not a ColorBrewer scheme in this tool. See the list in config.js.`);
+  });
+
+  return errors;
+}
+
+//  Checks the loaded data against config.js.
+//
+//  Property names are collected across every feature, not read off
+//  features[0]. Merged data very often has a ragged property set — one
+//  feature missing one field is normal — and testing the first feature alone
+//  reported a correctly named variable as "not found", which sends the
+//  reader off to check a spelling that was never wrong.
 function validate(geojson) {
   const errors = [];
-  if (!geojson.features || !geojson.features.length) {
+  const features = geojson.features;
+
+  if (!Array.isArray(features) || !features.length) {
     errors.push('The GeoJSON file contains no features. Check that the file is valid GeoJSON.');
     return errors;
   }
-  const props = geojson.features[0].properties || {};
-  if (!(FEATURE_ID_FIELD in props))
-    errors.push(`FEATURE_ID_FIELD: property "${FEATURE_ID_FIELD}" was not found. Check the exact property name in your GeoJSON and update config.js.`);
-  if (FEATURE_NAME_FIELD && !(FEATURE_NAME_FIELD in props))
-    errors.push(`FEATURE_NAME_FIELD: property "${FEATURE_NAME_FIELD}" was not found.`);
-  VARIABLES.forEach(v => {
-    if (!(v.prop in props))
-      errors.push(`Variable "${v.label}": property "${v.prop}" was not found. Check that the prop name in config.js matches exactly.`);
+
+  const names = new Set();
+  features.forEach(f => {
+    if (f && f.properties) for (const k in f.properties) names.add(k);
   });
+
+  if (!names.has(FEATURE_ID_FIELD))
+    errors.push(`FEATURE_ID_FIELD: property "${FEATURE_ID_FIELD}" appears on no feature. Check the exact property name in your GeoJSON and update config.js.`);
+  if (FEATURE_NAME_FIELD && !names.has(FEATURE_NAME_FIELD))
+    errors.push(`FEATURE_NAME_FIELD: property "${FEATURE_NAME_FIELD}" appears on no feature.`);
+  if (FEATURE_GROUP_FIELD && !names.has(FEATURE_GROUP_FIELD))
+    errors.push(`FEATURE_GROUP_FIELD: property "${FEATURE_GROUP_FIELD}" appears on no feature. Set it to null if your data has no parent geography.`);
+
+  VARIABLES.forEach(v => {
+    if (!names.has(v.prop))
+      errors.push(`Variable "${v.label}": property "${v.prop}" appears on no feature. Check that the prop name in config.js matches exactly, including spaces and capitalisation.`);
+  });
+
+  // Feature ids are the D3 join key and the members of the selection Set.
+  // Duplicates are silent and destructive: repeated ids collapse in the join,
+  // so features vanish from the map and selecting one highlights another.
+  if (names.has(FEATURE_ID_FIELD)) {
+    const seen = new Set();
+    const dupes = new Set();
+    let missing = 0, repeats = 0;
+    features.forEach(f => {
+      const id = f.properties ? f.properties[FEATURE_ID_FIELD] : undefined;
+      if (id == null || id === '') { missing++; return; }
+      if (seen.has(id)) { dupes.add(id); repeats++; } else seen.add(id);
+    });
+    if (missing)
+      errors.push(`FEATURE_ID_FIELD: ${missing.toLocaleString()} feature(s) have no "${FEATURE_ID_FIELD}" value. Every feature needs a unique id.`);
+    if (dupes.size)
+      errors.push(`FEATURE_ID_FIELD: "${FEATURE_ID_FIELD}" is not unique — ${repeats.toLocaleString()} feature(s) reuse an id already taken by another (repeated value${dupes.size > 1 ? 's' : ''}: ${[...dupes].slice(0, 3).join(', ')}${dupes.size > 3 ? ', …' : ''}). Duplicated ids make features vanish from the map and break selection. Add a unique id, e.g. gdf['fid'] = range(1, len(gdf) + 1).`);
+  }
+
+  // A variable that parses to nothing usable is almost always a config
+  // mistake — a text column mapped by accident, or a nullVal that matches
+  // every row — and produces an empty map with no other explanation.
+  VARIABLES.forEach(v => {
+    if (!names.has(v.prop)) return;
+    const usable = features.some(f => getFeatureValue(f, v.id) != null);
+    if (!usable)
+      errors.push(`Variable "${v.label}": no feature has a usable numeric value for "${v.prop}". Check that the field is numeric and that nullVal is not matching every row.`);
+  });
+
   return errors;
 }
 
@@ -1144,6 +1238,9 @@ function validate(geojson) {
 async function init() {
   applyPageIdentity();
   document.getElementById('loadingMsg').style.display = 'flex';
+
+  const configErrors = validateConfig();
+  if (configErrors.length) { showErrors('Configuration errors in config.js', configErrors); return; }
 
   let geojson;
   try {
@@ -1158,12 +1255,7 @@ async function init() {
   }
 
   const errors = validate(geojson);
-  if (errors.length) {
-    document.getElementById('loadingMsg').innerHTML =
-      `<span class="load-error">⚠ Configuration errors in config.js:<br><br>` +
-      errors.map(e => `• ${e}`).join('<br>') + '</span>';
-    return;
-  }
+  if (errors.length) { showErrors('The data does not match config.js', errors); return; }
 
   state.geojson = geojson;
   document.getElementById('loadingMsg').style.display = 'none';
