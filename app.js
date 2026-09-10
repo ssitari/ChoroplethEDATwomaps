@@ -131,16 +131,38 @@ function classifyEqual(values, k) {
   return d3.range(0, k + 1).map(i => lo + i * step);
 }
 
+//  Returns strictly increasing break points, so the number of classes the
+//  legend advertises is the number the map can actually draw.
+//
+//  Quantiles collapse whenever values are tied, and ties are the norm rather
+//  than the exception in real data — a rate that is zero across most small
+//  geographies, a rounded percentage, a count of a rare event. Asking for 5
+//  classes of a variable where 70% of features share one value produced
+//  breaks like [0.5, 0.5, 0.5, 0.5, 18, 40]: a legend listing five classes,
+//  three of them reading "0.5 – 0.5", over a map drawing two colors.
+//
+//  Dropping the duplicates yields fewer classes than requested, which is the
+//  honest answer; drawLegend says so rather than leaving the k control
+//  looking like it was ignored.
 function getBreaks(values, k, method) {
   if (!values.length) return [];
-  return method === 'equal' ? classifyEqual(values, k) : classifyQuantile(values, k);
+  const raw = method === 'equal' ? classifyEqual(values, k) : classifyQuantile(values, k);
+  const out = [];
+  raw.forEach(v => { if (!out.length || v > out[out.length - 1]) out.push(v); });
+  // Every value identical: one class, drawn in a single color.
+  return out.length >= 2 ? out : [out[0], out[0]];
 }
 
-function makeColorScale(schemeId, breaks, k) {
+//  Class count is derived from the breaks, never from the requested k, so a
+//  deduplicated set of breaks cannot leave the range longer than the domain
+//  (which is how an out-of-range class produced an undefined fill, and a
+//  polygon SVG paints black).
+function makeColorScale(schemeId, breaks) {
+  const k      = Math.max(breaks.length - 1, 1);
   const colors = brewerColors(schemeId, k);
   return d3.scaleThreshold()
     .domain(breaks.slice(1, breaks.length - 1))
-    .range(colors);
+    .range(colors.slice(0, k));
 }
 
 // ============================================================
@@ -201,6 +223,21 @@ function fmtBreak(v) {
   if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + 'M';
   if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(1) + 'k';
   return Number.isInteger(v) ? v.toString() : v.toFixed(1);
+}
+
+//  Legend breaks and scatter ticks run through the variable's own fmt, so
+//  they carry the same units as the tooltip and the statistics panel. The
+//  legend used to print bare numbers: a tooltip reading "$71,204" over a
+//  legend reading "48.5k – 71.2k", and percentages with no % anywhere on
+//  the map. fmtBreak remains the fallback for a fmt that throws.
+function fmtValue(vd, v) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  try {
+    const s = vd.fmt(v);
+    return (s == null || s === '') ? fmtBreak(v) : String(s);
+  } catch {
+    return fmtBreak(v);
+  }
 }
 
 // ============================================================
@@ -333,7 +370,7 @@ function applyColors(m) {
   if (!state.geojson || !m.tractsG) return;
   const allVals    = getValues(m.varId);
   const breaks     = getBreaks(allVals, state.buckets, state.classification);
-  const colorScale = makeColorScale(m.schemeId, breaks, state.buckets);
+  const colorScale = makeColorScale(m.schemeId, breaks);
   const hasSel     = state.selectedIds.size > 0;
 
   m.tractsG.selectAll('.tract')
@@ -357,9 +394,9 @@ function drawLegend(m) {
   const vd      = getVarDef(m.varId);
   const allVals = getValues(m.varId);
   const breaks  = getBreaks(allVals, state.buckets, state.classification);
-  const colorScale = makeColorScale(m.schemeId, breaks, state.buckets);
+  const colorScale = makeColorScale(m.schemeId, breaks);
   const colors  = colorScale.range();
-  const k       = state.buckets;
+  const k       = Math.max(breaks.length - 1, 0);
 
   document.getElementById(m.legendTitleId).textContent = vd.label;
 
@@ -367,7 +404,8 @@ function drawLegend(m) {
   container.innerHTML = '';
   for (let i = 0; i < k; i++) {
     const lo  = breaks[i], hi = breaks[i + 1];
-    const lbl = i === k - 1 ? `${fmtBreak(lo)} +` : `${fmtBreak(lo)} – ${fmtBreak(hi)}`;
+    const lbl = i === k - 1 ? `${fmtValue(vd, lo)} +`
+                            : `${fmtValue(vd, lo)} – ${fmtValue(vd, hi)}`;
     const row = document.createElement('div');
     row.className = 'legend-row';
     row.innerHTML =
@@ -381,6 +419,13 @@ function drawLegend(m) {
     `<span class="legend-swatch" style="background:${NULL_COLOR}"></span>` +
     `<span class="legend-label" style="color:#bbb">No data</span>`;
   container.appendChild(nullRow);
+
+  if (k && k < state.buckets) {
+    const note = document.createElement('div');
+    note.className = 'legend-note';
+    note.textContent = `${k} of ${state.buckets} classes — tied values`;
+    container.appendChild(note);
+  }
 
   const isDiverging = PALETTE_SCHEMES.diverging.some(s => s.id === m.schemeId);
   document.getElementById(m.legendWarnId).style.display =
@@ -629,7 +674,10 @@ function hideTooltip() {
 //  OLS regression lines shown for full population and selection.
 // ============================================================
 
-const SM = { top: 24, right: 22, bottom: 50, left: 52 };
+//  Margins leave room for tick labels carrying their units ("30.0%", not
+//  "30"). Widen `left` further if your fmt produces long labels — full
+//  currency, say — since the y-axis labels sit inside it.
+const SM = { top: 24, right: 34, bottom: 50, left: 60 };
 
 let scSvg, scG, scBrushG;
 let scXScale, scYScale;
@@ -729,16 +777,10 @@ function drawScatter() {
 
   // Axes
   scG.select('.sc-x-axis').call(
-    d3.axisBottom(scXScale).ticks(5).tickFormat(v =>
-      Math.abs(v) >= 1e6 ? (v/1e6).toFixed(0)+'M' :
-      Math.abs(v) >= 1e3 ? (v/1e3).toFixed(0)+'k' : v
-    )
+    d3.axisBottom(scXScale).ticks(5).tickFormat(v => fmtValue(vdX, v))
   ).selectAll('text').style('font-size', '10px');
   scG.select('.sc-y-axis').call(
-    d3.axisLeft(scYScale).ticks(5).tickFormat(v =>
-      Math.abs(v) >= 1e6 ? (v/1e6).toFixed(0)+'M' :
-      Math.abs(v) >= 1e3 ? (v/1e3).toFixed(0)+'k' : v
-    )
+    d3.axisLeft(scYScale).ticks(5).tickFormat(v => fmtValue(vdY, v))
   ).selectAll('text').style('font-size', '10px');
   scG.select('.sc-x-label').attr('x', W / 2).text(vdX.label);
   scG.select('.sc-y-label').attr('x', -H / 2).text(vdY.label);
