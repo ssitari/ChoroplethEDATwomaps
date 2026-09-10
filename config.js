@@ -29,8 +29,8 @@
 // ── Page identity ───────────────────────────────────────────────────────
 //
 //  PAGE_TITLE
-//    Shown in the browser tab and in the toolbar heading. Keep it short —
-//    the toolbar is a single unwrapped row on desktop.
+//    Shown in the browser tab and in the toolbar heading. Keep it short:
+//    it shares one row with every control on a wide screen.
 //
 //  DATA_CREDIT_HTML
 //    The footer line on the published page. This is the one thing a reader
@@ -123,24 +123,24 @@ export const FEATURE_GROUP_FIELD = 'Area Name';
 //    id       A unique short key — no spaces or special characters.
 //             Used to identify the variable in the defaults below.
 //
-//    label    Shown in the variable dropdown, histogram axis, and tooltip.
+//    label    Shown in the variable dropdown, the legend title, the
+//             scatterplot axis label, and the tooltip.
 //             Keep it concise; long labels may be truncated.
 //
 //    prop     The exact property name in your GeoJSON features.
 //             Must match character-for-character, including spaces and
 //             capitalisation. Check with a GeoJSON viewer if unsure.
 //
-//    fmt      A JavaScript function that formats one value for display
-//             in tooltips and statistics. Common patterns:
+//    fmt      A JavaScript function that formats one value for display.
+//             Used everywhere the variable's values are shown: tooltips,
+//             the statistics panel, the legend breaks, and the scatterplot
+//             axis ticks — so whatever units you put here appear on the map
+//             itself, not just on hover. Common patterns:
 //               Whole number:      v => Math.round(v).toLocaleString()
 //               One decimal:       v => v.toFixed(1)
 //               Percentage:        v => v.toFixed(1) + '%'
 //               Currency:          v => '$' + Math.round(v).toLocaleString()
 //               Per square mile:   v => Math.round(v).toLocaleString() + ' /mi²'
-//
-//    unit     Short unit string shown on the histogram axis label.
-//             Use an empty string '' if no unit is needed.
-//             Examples: '%', '$', '/mi²', 'per 100k', ''
 //
 //    nullVal  A data value that should be treated as "no data".
 //             Features with this value receive the null color on the map
@@ -171,7 +171,6 @@ export const VARIABLES = [
     label:   'Percent Fully Vaccinated',
     prop:    'Percent Fully Vaccinated',
     fmt:     v => v.toFixed(1) + '%',
-    unit:    '%',
     nullVal: null,
     diverge: false,
   },
@@ -180,7 +179,6 @@ export const VARIABLES = [
     label:   'Percent With at Least One Dose',
     prop:    'Percent With at Least One Dose',
     fmt:     v => v.toFixed(1) + '%',
-    unit:    '%',
     nullVal: null,
     diverge: false,
   },
@@ -189,7 +187,6 @@ export const VARIABLES = [
     label:   'Percent Over 65',
     prop:    'Percent Over 65',
     fmt:     v => v.toFixed(1) + '%',
-    unit:    '%',
     nullVal: null,
     diverge: false,
   },
@@ -198,7 +195,6 @@ export const VARIABLES = [
     label:   'Percent White',
     prop:    'Percent White',
     fmt:     v => v.toFixed(1) + '%',
-    unit:    '%',
     nullVal: null,
     diverge: false,
   },
@@ -207,7 +203,6 @@ export const VARIABLES = [
     label:   'Percent Black',
     prop:    'Percent Black',
     fmt:     v => v.toFixed(1) + '%',
-    unit:    '%',
     nullVal: null,
     diverge: false,
   },
@@ -216,7 +211,6 @@ export const VARIABLES = [
     label:   'Percent Hispanic',
     prop:    'Percent Hispanic',
     fmt:     v => v.toFixed(1) + '%',
-    unit:    '%',
     nullVal: null,
     diverge: false,
   },
@@ -276,7 +270,8 @@ export const DEFAULT_SCHEME_Y = 'BuGn';
 //    A neutral grey works best against most base colors.
 //
 //  SELECTION_COLOR
-//    Highlight color used in histograms to show selected features.
+//    Highlight color for selected features in the scatterplot, and for
+//    the regression line fitted to the selection.
 //    Should contrast clearly with both map palette colors.
 //
 //  DEEMPHASIS_OPACITY
