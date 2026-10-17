@@ -32,6 +32,9 @@
 //    Shown in the browser tab and in the toolbar heading. Keep it short:
 //    it shares one row with every control on a wide screen.
 //
+//  PAGE_SUBTITLE
+//    Optional smaller line under the heading. Set to '' to hide it.
+//
 //  DATA_CREDIT_HTML
 //    The footer line on the published page. This is the one thing a reader
 //    who arrives cold has to work from, so it should name the actual source
@@ -47,11 +50,15 @@
 //    belongs to the original author's account and your traffic would be
 //    reported there. Replace it with your own or set it to null.
 //
-export const PAGE_TITLE = 'Choropleth EDA — Two Maps';
+export const PAGE_TITLE = 'Compare Two Variables Across Space';
+
+export const PAGE_SUBTITLE = 'Explore each variable on its own map, then see how their values relate in the linked scatterplot';
 
 export const DATA_CREDIT_HTML = `
   Demo data: NYC DOHMH
-  <a href="https://github.com/nychealth/covid-vaccine-data" rel="noopener" target="_blank">COVID-19 Vaccine Data</a>.
+  <a href="https://github.com/nychealth/covid-vaccine-data" rel="noopener" target="_blank">COVID-19 Vaccine Data</a>
+  as of March 26, 2021 &mdash; a historical snapshot from early in the vaccine rollout, not current figures.
+  Demographics: US Census Bureau, American Community Survey 2017&ndash;21 5-year estimates.
   Source code, method notes and full citations:
   <a href="https://github.com/ssitari/ChoroplethEDATwomaps" rel="noopener" target="_blank">ssitari/ChoroplethEDATwomaps</a>.
 `;

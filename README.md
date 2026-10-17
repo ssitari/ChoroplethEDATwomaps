@@ -1,4 +1,6 @@
-# Choropleth EDA — Two Maps
+# Compare Two Variables Across Space
+
+Explore each variable on its own map, then see how their values relate in the linked scatterplot.
 
 An interactive dual choropleth explorer linking two stacked univariate maps to a scatterplot with OLS regression and bidirectional selection. Each map displays an independently chosen and colored variable; the scatterplot plots them against each other.
 
@@ -69,6 +71,9 @@ page says about itself:
 
 ```javascript
 export const PAGE_TITLE = 'Vacancy and Rent Burden by Tract';
+
+// Optional line under the heading; '' hides it.
+export const PAGE_SUBTITLE = 'ACS 5-year estimates, 2020–24';
 
 // Footer credit. Inline HTML is allowed so you can link the source.
 // Never leave the demo credit in place over your own data.
@@ -165,7 +170,7 @@ your copy unless you change them:
   original author's account. Replace it with your own or set it to `null`.
 - **`DATA_CREDIT_HTML`** — the demo footer credits NYC DOHMH. Left in place
   over your data it misattributes your map.
-- **`PAGE_TITLE`** — appears in the browser tab and the toolbar.
+- **`PAGE_TITLE`** and **`PAGE_SUBTITLE`** — appear in the browser tab and the toolbar.
 - **`data/MODZCTAS_Vaccine_2021.geojson`** — delete the demo file once your
   own data loads.
 
@@ -280,10 +285,11 @@ A warning appears in the palette picker when a diverging scheme is selected for 
 
 ## Demo data
 
-The included demo dataset covers **NYC Modified Zip Code Tabulation Areas (MODZCTAs)** with COVID-19 vaccination rates and demographic data as of March 26, 2021.
+The included demo dataset covers **NYC Modified Zip Code Tabulation Areas (MODZCTAs)** with COVID-19 vaccination rates as of March 26, 2021, and demographic data from the 2017–2021 American Community Survey (ACS) 5-year estimates.
 
-**Source:** NYC Department of Health and Mental Hygiene (DOHMH)
-NYC COVID-19 Vaccine Data — [github.com/nychealth/covid-vaccine-data](https://github.com/nychealth/covid-vaccine-data)
+**Sources:**
+- Vaccination rates: NYC Department of Health and Mental Hygiene (DOHMH), NYC COVID-19 Vaccine Data — [github.com/nychealth/covid-vaccine-data](https://github.com/nychealth/covid-vaccine-data)
+- Demographics (percent over 65, white, Black, Hispanic): US Census Bureau, American Community Survey 2017–2021 5-year estimates — [data.census.gov](https://data.census.gov)
 
 **Geography:** NYC MODZCTA boundaries are derived from US Census ZIP Code Tabulation Areas, modified by DOHMH for public health reporting. Original boundaries available at [NYC Open Data](https://data.cityofnewyork.us).
 

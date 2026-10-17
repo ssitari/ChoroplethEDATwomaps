@@ -12,6 +12,11 @@ import {
   DEFAULT_SCHEME_X, DEFAULT_SCHEME_Y,
   NULL_COLOR, SELECTION_COLOR, DEEMPHASIS_OPACITY,
 } from './config.js';
+// Keys added after release are read off the namespace rather than named in
+// the list above: a config.js that predates them does not export them, and a
+// missing named import is a SyntaxError that kills the whole page.
+import * as CONFIG from './config.js';
+const PAGE_SUBTITLE = CONFIG.PAGE_SUBTITLE ?? '';
 
 // ============================================================
 //  PAGE IDENTITY
@@ -26,6 +31,9 @@ function applyPageIdentity() {
     document.title = PAGE_TITLE;
     document.getElementById('appTitle').textContent = PAGE_TITLE;
   }
+  const subtitle = document.getElementById('appSubtitle');
+  subtitle.textContent = PAGE_SUBTITLE;
+  subtitle.hidden = !PAGE_SUBTITLE;
 
   const footer = document.getElementById('pageCredit');
   if (DATA_CREDIT_HTML && DATA_CREDIT_HTML.trim()) {

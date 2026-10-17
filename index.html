@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Placeholder only; the real title is set from PAGE_TITLE in config.js -->
-  <title>Choropleth EDA</title>
+  <title>Compare Two Variables Across Space</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,7 +39,16 @@
       font-weight: 600;
       color: #222;
       white-space: nowrap;
-      margin-right: 2px;
+      line-height: 1.25;
+    }
+    /* The subtitle is a full sentence, so it wraps inside a fixed width
+       rather than stretching the title block and pushing controls onto a
+       second toolbar row. */
+    .title-block { margin-right: 2px; max-width: 300px; }
+    .subtitle {
+      font-size: 11px;
+      color: #888;
+      line-height: 1.25;
     }
     .tb-sep {
       width: 0.5px;
@@ -476,7 +485,10 @@
 
   <!-- ── Toolbar ───────────────────────────────────────────────────── -->
   <div id="toolbar">
-    <h1 id="appTitle"></h1>
+    <div class="title-block">
+      <h1 id="appTitle"></h1>
+      <p class="subtitle" id="appSubtitle" hidden></p>
+    </div>
     <div class="tb-sep"></div>
 
     <div class="ctrl-group">
