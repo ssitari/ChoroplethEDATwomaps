@@ -2,11 +2,11 @@
 
 Explore each variable on its own map, then see how their values relate in the linked scatterplot.
 
-An interactive dual choropleth explorer linking two stacked univariate maps to a scatterplot with OLS regression and bidirectional selection. Each map displays an independently chosen and colored variable; the scatterplot plots them against each other.
+This is an attempt to put together a platform for two interactive choropleth maps linked to a scatterplot for exploration of two continuous variables. Brushing is bidirectional, allowing for map selections (that select the same geographies on the other map and select the cases in the plot) or selections on the plot, that select the geographies in both maps. This example uses zip code approximations in New York City, and information on early 2021 COVID vaccination uptake along with demographic data from the American Community Survey.  The example approximates maps used in the story [Why Are Some N.Y.C. Neighborhoods Still Waiting for Vaccines?](https://www.nytimes.com/interactive/2021/03/26/nyregion/nyc-vaccination-rates-map.html) from the 3/26/21 edition of the New York Times. This platform is similar to the bivariate interpretation of the same data [in this repo](https://github.com/ssitari/ChoroplethEDABivariate).  However this formulation classifies and visualises each variable separately.  I will likely make other examples with different geographies. Similarly, I am posting a few related projects with univariate/histogram examples in other Github repos.
 
-The inspiration for this is the brushable EDA toolset in [GeoDa](https://geodacenter.github.io/), which I have been using for years. It's remarkable that ESRI and QGIS still haven't brought those tools into their own platforms. This is an effort to replicate that kind of linked-view interactivity for outward-facing web visualization.
+The inspiration for this is the brushable EDA toolset in GeoDa, which I have been using for years. It's remarkable that ESRI and QGIS still haven't brought those tools into their own platforms. This is an effort to replicate that kind of linked-view interactivity for outward-facing web visualization.
 
-Built with [D3.js](https://d3js.org). No build step required — plain HTML, CSS, and ES modules.
+Built with D3.js. No build step required — plain HTML, CSS, and ES modules.
 
 ---
 
